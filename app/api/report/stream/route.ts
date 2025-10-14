@@ -7,7 +7,7 @@ import { fetchClientByExactTitle, findFirstPdfUrlFromPage, findMonthlyRecapPageI
 import { normalizeChannels, filterExtractionByAllowedChannels } from "@/lib/channels";
 import { downloadPdfToTmp, isDirectPdfUrl } from "@/lib/pdf";
 import { extractFromPdfToJson, draftMarkdownReport } from "@/lib/claude";
-import { gateChannelsInMarkdown } from "@/lib/format";
+import { gateChannelsInMarkdown, generateNarrativeContext, polishNarrativeReport } from "@/lib/format";
 import { logEvent } from "@/lib/logger";
 import fs from "fs";
 
@@ -142,6 +142,10 @@ export async function GET(req: NextRequest) {
       }
 
       await send("phase", "Drafting");
+      
+      // Generate narrative insights from extraction data
+      const narrativeContext = generateNarrativeContext(extraction_json);
+      
       const contextPacket = {
         client_name: client.client,
         community: client.community,
@@ -154,6 +158,10 @@ export async function GET(req: NextRequest) {
         allowed_channels,
         client_account_manager: client.client_account_manager,
         pdf_local_path,
+        // Add narrative hints to help Claude write better
+        narrative_wins: narrativeContext.wins,
+        narrative_opportunities: narrativeContext.opportunities,
+        standout_items: narrativeContext.standout_items,
       };
 
       let markdown_report: string | null = null;
@@ -164,7 +172,9 @@ export async function GET(req: NextRequest) {
           extractionJson: JSON.stringify(extraction_json ?? {}),
         });
         if (markdown_report) {
+          // Gate channels and apply narrative polish
           markdown_report = gateChannelsInMarkdown(markdown_report, allowed_channels);
+          markdown_report = polishNarrativeReport(markdown_report);
         }
         logEvent("drafting_completed");
       } catch {
