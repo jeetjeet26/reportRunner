@@ -12,12 +12,13 @@ const EnvSchema = z.object({
 });
 
 const isProd = process.env.NODE_ENV === "production";
+const isBuild = process.env.NEXT_PHASE === "phase-production-build";
 const parsed = EnvSchema.safeParse({
-  NOTION_API_KEY: process.env.NOTION_API_KEY ?? (isProd ? undefined : "placeholder"),
-  NOTION_CLIENTS_DB_ID: process.env.NOTION_CLIENTS_DB_ID ?? (isProd ? undefined : "placeholder"),
-  NOTION_MONTHLY_RECAPS_PARENT_PAGE_ID: process.env.NOTION_MONTHLY_RECAPS_PARENT_PAGE_ID ?? (isProd ? undefined : "placeholder"),
+  NOTION_API_KEY: process.env.NOTION_API_KEY ?? (isProd && !isBuild ? undefined : "placeholder"),
+  NOTION_CLIENTS_DB_ID: process.env.NOTION_CLIENTS_DB_ID ?? (isProd && !isBuild ? undefined : "placeholder"),
+  NOTION_MONTHLY_RECAPS_PARENT_PAGE_ID: process.env.NOTION_MONTHLY_RECAPS_PARENT_PAGE_ID ?? (isProd && !isBuild ? undefined : "placeholder"),
   NOTION_MONTHLY_RECAPS_DB_ID: process.env.NOTION_MONTHLY_RECAPS_DB_ID ?? undefined,
-  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? (isProd ? undefined : "placeholder"),
+  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? (isProd && !isBuild ? undefined : "placeholder"),
 });
 
 if (!parsed.success) {
