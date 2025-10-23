@@ -10,7 +10,8 @@ export type IntentParseResult = {
 
 /**
  * Parse a natural language prompt like "Write analytics report for Acme Midtown for July 2025".
- * Extracts client and month (normalized to YYYY-MM), and generates at most one clarifying question if missing.
+ * The name token after "for" can be a Client or a Community. We don't decide here; API will try both.
+ * Extracts name token and month (normalized to YYYY-MM), and generates at most one clarifying question if missing.
  */
 export function parseIntent(prompt: string): IntentParseResult {
   const raw = (prompt || "").trim();
@@ -63,7 +64,7 @@ function needBoth(): IntentParseResult {
     month: null,
     month_label: null,
     needs_clarification: true,
-    clarification_question: "Which Client and Month (YYYY-MM or 'Month YYYY') should I use?",
+    clarification_question: "Which Client or Community and Month (YYYY-MM or 'Month YYYY') should I use?",
   };
 }
 
@@ -73,7 +74,7 @@ function needClient(monthLabel: string | null): IntentParseResult {
     month: null,
     month_label: monthLabel,
     needs_clarification: true,
-    clarification_question: "Which Client should I use?",
+    clarification_question: "Which Client or Community should I use?",
   };
 }
 

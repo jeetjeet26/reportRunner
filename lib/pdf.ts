@@ -14,7 +14,8 @@ export async function isDirectPdfUrl(url: string): Promise<boolean> {
   try {
     const u = new URL(url);
     const pathname = u.pathname.toLowerCase();
-    if (pathname.endsWith(".pdf")) return true;
+    // Allow Notion signed file links which include .pdf in the path
+    if (pathname.includes(".pdf")) return true;
     const res = await fetch(url, { method: "HEAD" });
     const ct = res.headers.get("content-type") || "";
     return ct.toLowerCase().includes("application/pdf");
