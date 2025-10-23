@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 import { NextRequest } from "next/server";
 import { env } from "@/lib/env";
 import { parseIntent } from "@/lib/intent";
-import { fetchClientByExactTitle, findFirstPdfUrlFromPage, findMonthlyRecapPageId } from "@/lib/notion";
+import { fetchClientByExactTitle, fetchClientByExactCommunity, findFirstPdfUrlFromPage, findMonthlyRecapPageId, getMonthlyRecapLinks } from "@/lib/notion";
 import { normalizeChannels, filterExtractionByAllowedChannels } from "@/lib/channels";
 import { downloadPdfToTmp, isDirectPdfUrl } from "@/lib/pdf";
 import { extractFromPdfToJson, draftMarkdownReport } from "@/lib/claude";
@@ -41,10 +41,15 @@ export async function GET(req: NextRequest) {
         return;
       }
 
-      const clientTitle = intent.client as string;
-      const client = await fetchClientByExactTitle(clientTitle);
+      const nameToken = intent.client as string;
+      let client = await fetchClientByExactCommunity(nameToken);
+      let matchedByCommunity = !!client;
       if (!client) {
-        await send("error", "I can’t find that `Client` in Communities + Clients. Use the exact `Client` title.");
+        client = await fetchClientByExactTitle(nameToken);
+        matchedByCommunity = false;
+      }
+      if (!client) {
+        await send("error", "I can’t find that Client or Community in Communities + Clients. Use the exact title.");
         await writer.close();
         return;
       }
@@ -65,7 +70,8 @@ export async function GET(req: NextRequest) {
         month_label: intent.month_label,
       });
 
-      logEvent("start", `report for ${client.client} ${intent.month_label}`);
+      const nameForMonthly = matchedByCommunity ? (client.community || nameToken) : client.client;
+      logEvent("start", `report for ${nameForMonthly} ${intent.month_label}`);
       await send("phase", "Locating PDF");
 
       let pdfUrl: string | null = null;
@@ -78,15 +84,26 @@ export async function GET(req: NextRequest) {
           return;
         }
       } else {
-        const pageId = await findMonthlyRecapPageId(client.client, intent.month_label as string);
-        if (pageId) {
-          logEvent("client_found", client.client);
-          const hit = await findFirstPdfUrlFromPage(pageId);
-          if (hit) {
-            if (hit.source === "uploaded") {
-              pdfUrl = hit.url; // signed URL
-            } else {
-              if (await isDirectPdfUrl(hit.url)) pdfUrl = hit.url;
+        const links = await getMonthlyRecapLinks({ communityName: nameForMonthly, monthLabel: intent.month_label as string }).catch(() => null);
+        if (links) {
+          if (links.pdfUrl && await isDirectPdfUrl(links.pdfUrl)) {
+            pdfUrl = links.pdfUrl;
+          }
+          if (!pdfUrl && links.lookerUrl && await isDirectPdfUrl(links.lookerUrl)) {
+            pdfUrl = links.lookerUrl;
+          }
+        }
+        if (!pdfUrl) {
+          const pageId = await findMonthlyRecapPageId(nameForMonthly, intent.month_label as string);
+          if (pageId) {
+            logEvent("client_found", nameForMonthly);
+            const hit = await findFirstPdfUrlFromPage(pageId);
+            if (hit) {
+              if (hit.source === "uploaded") {
+                pdfUrl = hit.url; // signed URL
+              } else {
+                if (await isDirectPdfUrl(hit.url)) pdfUrl = hit.url;
+              }
             }
           }
         }

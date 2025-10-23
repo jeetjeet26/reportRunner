@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 import { NextRequest } from "next/server";
 import { env } from "@/lib/env";
 import { parseIntent } from "@/lib/intent";
-import { fetchClientByExactTitle, findMonthlyRecapPageId, findFirstPdfUrlFromPage } from "@/lib/notion";
+import { fetchClientByExactTitle, fetchClientByExactCommunity, findMonthlyRecapPageId, findFirstPdfUrlFromPage, getMonthlyRecapLinks } from "@/lib/notion";
 import { normalizeChannels, filterExtractionByAllowedChannels } from "@/lib/channels";
 import { downloadPdfToTmp, isDirectPdfUrl } from "@/lib/pdf";
 import { extractFromPdfToJson, draftMarkdownReport } from "@/lib/claude";
@@ -25,11 +25,17 @@ export async function POST(_req: NextRequest) {
     );
   }
 
-  // intent.client and intent.month exist here
-  const clientTitle = intent.client as string;
+  // intent.client (name token) and intent.month exist here. Try Client first, then Community.
+  const nameToken = intent.client as string;
   let client: any = null;
+  let matchedByCommunity = false;
   try {
-    client = await fetchClientByExactTitle(clientTitle);
+    // Try matching by Community first because that column may be a relation
+    client = await fetchClientByExactCommunity(nameToken);
+    matchedByCommunity = !!client;
+    if (!client) {
+      client = await fetchClientByExactTitle(nameToken);
+    }
   } catch (e: any) {
     const msg = String(e?.message || e) || "Unknown error";
     return new Response(
@@ -39,7 +45,7 @@ export async function POST(_req: NextRequest) {
   }
   if (!client) {
     return new Response(
-      JSON.stringify({ error: "I can’t find that `Client` in Communities + Clients. Use the exact `Client` title." }),
+      JSON.stringify({ error: "I can’t find that Client or Community in Communities + Clients. Use the exact title." }),
       { status: 404, headers: { "content-type": "application/json" } }
     );
   }
@@ -47,7 +53,9 @@ export async function POST(_req: NextRequest) {
   const allowed_channels = normalizeChannels(client.platforms_channels);
   
   // Locate monthly recap page and first PDF, unless overridden
-  logEvent("start", `report for ${client.client} ${intent.month_label}`);
+  // Use Client title if matched by client; otherwise use Community name for monthly recap lookup
+  const nameForMonthly = matchedByCommunity ? (client.community || nameToken) : client.client;
+  logEvent("start", `report for ${nameForMonthly} ${intent.month_label}`);
   let pdfUrl: string | null = null;
   if (overridePdfUrl) {
     if (await isDirectPdfUrl(overridePdfUrl)) {
@@ -59,21 +67,21 @@ export async function POST(_req: NextRequest) {
       );
     }
   } else {
-    let pageId: string | null = null;
-    try {
-      pageId = await findMonthlyRecapPageId(client.client, intent.month_label as string);
-    } catch (e: any) {
-      const msg = String(e?.message || e) || "Unknown error";
-      return new Response(
-        JSON.stringify({ error: `Notion error: ${msg}` }),
-        { status: 502, headers: { "content-type": "application/json" } }
-      );
+    // Prefer Monthly Recaps database when available
+    const links = await getMonthlyRecapLinks({ communityName: nameForMonthly, monthLabel: intent.month_label as string }).catch(() => null);
+    if (links) {
+      if (links.pdfUrl && await isDirectPdfUrl(links.pdfUrl)) {
+        pdfUrl = links.pdfUrl;
+      }
+      if (!pdfUrl && links.lookerUrl && await isDirectPdfUrl(links.lookerUrl)) {
+        pdfUrl = links.lookerUrl;
+      }
     }
-    if (pageId) {
-      logEvent("client_found", client.client);
-      let hit: any = null;
+    // Fallback to scanning the page children under the parent page by title
+    if (!pdfUrl) {
+      let pageId: string | null = null;
       try {
-        hit = await findFirstPdfUrlFromPage(pageId);
+        pageId = await findMonthlyRecapPageId(nameForMonthly, intent.month_label as string);
       } catch (e: any) {
         const msg = String(e?.message || e) || "Unknown error";
         return new Response(
@@ -81,12 +89,24 @@ export async function POST(_req: NextRequest) {
           { status: 502, headers: { "content-type": "application/json" } }
         );
       }
-      if (hit) {
-        if (hit.source === "uploaded") {
-          pdfUrl = hit.url; // signed URL
-        } else {
-          // external/bookmark must be a direct PDF
-          if (await isDirectPdfUrl(hit.url)) pdfUrl = hit.url;
+      if (pageId) {
+        logEvent("client_found", nameForMonthly);
+        let hit: any = null;
+        try {
+          hit = await findFirstPdfUrlFromPage(pageId);
+        } catch (e: any) {
+          const msg = String(e?.message || e) || "Unknown error";
+          return new Response(
+            JSON.stringify({ error: `Notion error: ${msg}` }),
+            { status: 502, headers: { "content-type": "application/json" } }
+          );
+        }
+        if (hit) {
+          if (hit.source === "uploaded") {
+            pdfUrl = hit.url; // signed URL
+          } else {
+            if (await isDirectPdfUrl(hit.url)) pdfUrl = hit.url;
+          }
         }
       }
     }
