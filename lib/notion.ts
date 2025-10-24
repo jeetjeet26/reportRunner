@@ -1,5 +1,6 @@
 import { Client } from "@notionhq/client";
 import { env } from "@/lib/env";
+import { tryParseMonth } from "@/lib/intent_utils";
 
 const notion = new Client({ auth: env.NOTION_API_KEY });
 
@@ -126,7 +127,7 @@ function normalizeForMatching(str: string): string {
 }
 
 // Match a PDF to a community by filename
-function matchPdfToCommunity(
+export function matchPdfToCommunity(
   communityName: string, 
   pdfFiles: Array<{ url: string; name: string }>
 ): string | null {
@@ -468,4 +469,90 @@ export async function getMonthlyRecapLinks(params: {
   return null;
 }
 
+
+
+// List distinct recap month labels from the Monthly Recaps inline database
+export async function listAvailableRecapMonths(): Promise<string[]> {
+  const parentPageId = env.NOTION_MONTHLY_RECAPS_PARENT_PAGE_ID;
+  const dbId = await findInlineDatabaseIdOnPage(parentPageId);
+  if (!dbId) return [];
+
+  const res = await notion.databases.query({ database_id: dbId, page_size: 100 });
+  const set = new Set<string>();
+  for (const page of res.results as any[]) {
+    const props = page.properties;
+    const label = getMonthLabelFromProperty(props?.["Recap Month"]) || getFirstTitleFromProperties({ RM: props?.["Recap Month"] });
+    if (label && label.trim()) set.add(label.trim());
+  }
+
+  // Sort descending by inferred date (year, month) when possible, else lexicographic desc
+  const arr = Array.from(set);
+  const parsed: Array<{ raw: string; y: number; m: number; ok: boolean }> = arr.map(raw => {
+    const hit = tryParseMonth(raw);
+    if (hit) return { raw, y: hit.year, m: hit.month, ok: true };
+    return { raw, y: 0, m: 0, ok: false };
+  });
+
+  parsed.sort((a, b) => {
+    if (a.ok && b.ok) {
+      if (a.y !== b.y) return b.y - a.y;
+      return b.m - a.m;
+    }
+    if (a.ok && !b.ok) return -1;
+    if (!a.ok && b.ok) return 1;
+    return b.raw.localeCompare(a.raw);
+  });
+
+  return parsed.map(p => p.raw);
+}
+
+export type RecapJobDescriptor = {
+  rowId: string;
+  communities: string[];
+  pdfUrls: string[];
+  lookerUrl: string | null;
+  descriptor: string;
+};
+
+// List recap rows for a given month label
+export async function listRecapsByMonth(monthLabel: string): Promise<RecapJobDescriptor[]> {
+  const parentPageId = env.NOTION_MONTHLY_RECAPS_PARENT_PAGE_ID;
+  const dbId = await findInlineDatabaseIdOnPage(parentPageId);
+  if (!dbId) return [];
+
+  const res = await notion.databases.query({ database_id: dbId, page_size: 100 });
+  const out: RecapJobDescriptor[] = [];
+  for (const page of res.results as any[]) {
+    const props = page.properties;
+
+    // Month match
+    const month = getMonthLabelFromProperty(props?.["Recap Month"]) || getFirstTitleFromProperties({ RM: props?.["Recap Month"] });
+    if ((month || "").trim() !== monthLabel.trim()) continue;
+
+    // Communities
+    let communities: string[] = [];
+    if (props?.Community?.type === "relation" && Array.isArray(props.Community.relation) && props.Community.relation.length > 0) {
+      communities = await getRelatedPageTitlesFromRelationProperty(props.Community);
+    } else {
+      const communityRaw = getPlainText(props?.Community) || getTitle(props?.Community);
+      communities = parseMultipleCommunities(communityRaw);
+      if (communities.length === 0 && communityRaw) communities = [communityRaw];
+    }
+    communities = communities.map(c => c.trim()).filter(Boolean);
+    if (communities.length === 0) continue;
+
+    // PDFs
+    const pdfProp = props?.["PDF To Attach"] || props?.PDF;
+    const files = getAllFilesFromProperty(pdfProp);
+    const pdfUrls = files.map(f => f.url).filter(Boolean);
+
+    // Looker URL
+    const lookerUrl = getUrlOrText(props?.["Looker Studio Link (From Community)"]) || null;
+
+    const descriptor = `${communities.join(", ")} — ${pdfUrls.length} PDF${pdfUrls.length === 1 ? "" : "s"}${lookerUrl ? " + Looker" : ""}`;
+    out.push({ rowId: page.id as string, communities, pdfUrls, lookerUrl, descriptor });
+  }
+
+  return out;
+}
 

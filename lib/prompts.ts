@@ -7,7 +7,7 @@ export const extractionSystem = (
 export const extractionUser = (
   contextSummary: string,
   schemaJson: string
-) => `Context:\n${contextSummary}\n\nExtract only explicit data from the attached PDF. Output strict JSON only.\nSchema:\n${schemaJson}`;
+) => `Context:\n${contextSummary}\n\nExtract only explicit data from the attached PDF. Output strict JSON only.\n- Use 'site' for website/organic/Google Analytics data.\n- Omit any channel sections that are not present; do NOT output null.\nSchema:\n${schemaJson}`;
 
 export const draftingSystem = () => `You are an expert digital marketing account manager writing a monthly performance report for a valued client. Your tone should be warm, professional, and consultative. Frame all insights positively - celebrate wins, acknowledge stable performance, and reframe challenges as opportunities for optimization. Write in a narrative style, not as bullet points or numbered lists. Use only allowed_channels. Never invent numbers. Obey gating rules strictly.
 
@@ -86,6 +86,10 @@ export const draftingUser = (
 - If Platforms/Channels empty, provide conservative summary + note "We'll work on expanding tracking coverage next month"
 - Only write sections for allowed_channels
 - If a metric is missing or null, don't mention it - focus on available data
+
+**Multi-Community Guidance:**
+- If the context indicates multi_community = true or suppress_property_sections = true, write a single consolidated overview across communities highlighting the top cross-community insights.
+- Do not deep-dive per community unless differences are material. If needed, include at most 1–2 bullets for standout properties under a short "Property Highlights" note.
 
 ContextPacket:
 ${contextPacketJson}

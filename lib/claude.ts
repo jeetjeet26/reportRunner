@@ -80,7 +80,8 @@ export async function extractFromPdfToJson({
     } catch (e) {
       throw new Error("The extraction output was invalid JSON. Retrying once with stricter validation.");
     }
-    const validated = ExtractionSchema.parse(parsed);
+    const normalized = normalizeExtractionJson(parsed);
+    const validated = ExtractionSchema.parse(normalized);
     return validated;
   };
 
@@ -93,6 +94,53 @@ export async function extractFromPdfToJson({
     }
     throw err;
   }
+}
+
+function normalizeExtractionJson(parsed: unknown): any {
+  if (!parsed || typeof parsed !== "object") return {};
+  const input = parsed as Record<string, any>;
+  const out: Record<string, any> = {};
+
+  // Alias channels that the model may emit
+  const aliasToKey: Record<string, string> = {
+    organic: "site",
+    website: "site",
+    analytics: "site",
+    google_analytics: "site",
+  };
+
+  const allowedTopKeys = new Set([
+    "site",
+    "google_ads",
+    "meta_ads",
+    "linkedin",
+    "email_marketing",
+    "ils",
+    "anomalies",
+    "data_quality",
+    "top_keywords_or_creatives",
+  ]);
+
+  // Promote aliases to site and copy through only allowed keys
+  for (const [key, value] of Object.entries(input)) {
+    const mapped = aliasToKey[key] || key;
+    if (!allowedTopKeys.has(mapped)) continue; // drop unknown keys
+
+    // Drop null or non-object sections for channel sections (object expected)
+    if (["site","google_ads","meta_ads","linkedin","email_marketing","ils"].includes(mapped)) {
+      if (value && typeof value === "object") {
+        out[mapped] = value;
+      }
+      continue;
+    }
+
+    // Arrays (anomalies, data_quality, top_keywords_or_creatives) — keep only arrays of strings
+    if (Array.isArray(value)) {
+      out[mapped] = value.filter(v => typeof v === "string");
+    }
+  }
+
+  return out;
 }
 
 export async function draftMarkdownReport({

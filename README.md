@@ -65,6 +65,17 @@ Write analytics report for Acme Midtown for July 2025
 - Component: `Chat.tsx` provides an input, progress pills (Finding client → Locating PDF → Extracting → Drafting → Done), clarification flow, error handling, and markdown preview with copy/download.
 - Uses SSE when available; automatically falls back to POST.
 
+### Bulk Runs
+- Route: `/bulk`
+- Endpoints:
+  - `GET /api/bulk/months` → `{ months: string[] }`
+  - `GET /api/bulk/recaps?month=...` → `{ recaps: { jobId, rowId, communities, pdfUrls, lookerUrl, descriptor }[] }`
+  - `GET /api/bulk/stream?month=...&ids=...&concurrency=3` → SSE events interleaved across jobs
+- UI behavior:
+  - Pick a month, list recap rows, select any subset
+  - Start one SSE stream to process jobs in parallel (default 3)
+  - Each job card shows compact status and final markdown with copy/download
+
 ## API
 - **Streaming (recommended)**
   - `GET /api/report/stream?prompt=...&pdf_url=...`
