@@ -31,6 +31,15 @@ async function getRelatedPageTitle(pageId: string): Promise<string | null> {
   return null;
 }
 
+// Fetch titles for all pages in a relation property (returns empty array if not a relation)
+async function getRelatedPageTitlesFromRelationProperty(prop: any): Promise<string[]> {
+  if (!prop || prop.type !== "relation" || !Array.isArray(prop.relation) || prop.relation.length === 0) return [];
+  const titles = await Promise.all(
+    prop.relation.map((rel: any) => getRelatedPageTitle(rel.id as string))
+  );
+  return titles.filter((t: any): t is string => !!t);
+}
+
 // Find the first inline database (child_database) on a page and return its database id
 async function findInlineDatabaseIdOnPage(parentPageId: string): Promise<string | null> {
   let cursor: string | undefined = undefined;
@@ -69,6 +78,95 @@ function getUrlOrText(prop: any): string | null {
     if (f?.type === "external" && f.external?.url) return f.external.url as string;
     if (f?.type === "file" && f.file?.url) return f.file.url as string;
   }
+  return null;
+}
+
+// Extract all files from a multi-file property
+function getAllFilesFromProperty(prop: any): Array<{ url: string; name: string }> {
+  if (!prop || prop.type !== "files" || !Array.isArray(prop.files)) return [];
+  
+  const files: Array<{ url: string; name: string }> = [];
+  for (const f of prop.files) {
+    let url: string | null = null;
+    let name: string = "";
+    
+    if (f?.type === "external" && f.external?.url) {
+      url = f.external.url as string;
+      name = f.name || "";
+    } else if (f?.type === "file" && f.file?.url) {
+      url = f.file.url as string;
+      name = f.name || "";
+    }
+    
+    if (url) {
+      files.push({ url, name });
+    }
+  }
+  return files;
+}
+
+// Parse multiple communities from a field (handles comma-separated or newline-separated)
+function parseMultipleCommunities(communityValue: string | null): string[] {
+  if (!communityValue) return [];
+  
+  // Split on commas, newlines, or pipe characters
+  const parts = communityValue.split(/[,\n|]+/);
+  
+  return parts
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+}
+
+// Normalize a string for matching (lowercase, remove special chars)
+function normalizeForMatching(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+// Match a PDF to a community by filename
+function matchPdfToCommunity(
+  communityName: string, 
+  pdfFiles: Array<{ url: string; name: string }>
+): string | null {
+  if (pdfFiles.length === 0) return null;
+  if (pdfFiles.length === 1) return pdfFiles[0].url; // If only one PDF, return it
+  
+  const normalizedCommunity = normalizeForMatching(communityName);
+  console.log(`[matchPdfToCommunity] Looking for community="${communityName}" (normalized: "${normalizedCommunity}") in ${pdfFiles.length} PDFs`);
+  
+  // Try to find a PDF whose filename contains the community name
+  for (const pdf of pdfFiles) {
+    // Try the name property first
+    if (pdf.name) {
+      const normalizedName = normalizeForMatching(pdf.name);
+      console.log(`[matchPdfToCommunity] Checking name="${pdf.name}" (normalized: "${normalizedName}")`);
+      if (normalizedName.includes(normalizedCommunity)) {
+        console.log(`[matchPdfToCommunity] ✓ Match found by name!`);
+        return pdf.url;
+      }
+    }
+    
+    // Fallback: extract filename from URL
+    try {
+      const url = new URL(pdf.url);
+      const pathParts = url.pathname.split('/');
+      const filename = pathParts[pathParts.length - 1];
+      const normalizedFilename = normalizeForMatching(filename);
+      console.log(`[matchPdfToCommunity] Checking filename from URL="${filename}" (normalized: "${normalizedFilename}")`);
+      if (normalizedFilename.includes(normalizedCommunity)) {
+        console.log(`[matchPdfToCommunity] ✓ Match found by URL filename!`);
+        return pdf.url;
+      }
+    } catch {
+      // Invalid URL, skip
+      console.log(`[matchPdfToCommunity] Invalid URL, skipping`);
+    }
+  }
+  
+  // No match found
+  console.log(`[matchPdfToCommunity] ✗ No match found for "${communityName}"`);
   return null;
 }
 
@@ -266,6 +364,11 @@ export async function findFirstPdfUrlFromPage(pageId: string): Promise<{ url: st
 }
 
 // Query Monthly Recaps database for a row that matches community + month label
+// Supports multi-community rows where:
+// - Community field contains multiple comma/newline-separated communities
+// - PDF To Attach field contains multiple files (multi-file property)
+// - PDFs are matched by filename (e.g., "APG_Whitehawk_..." matches "Whitehawk" community)
+// - Falls back to position-based matching if names don't match but counts align
 export async function getMonthlyRecapLinks(params: {
   communityName: string;
   monthLabel: string; // e.g., "September 2025"
@@ -277,24 +380,91 @@ export async function getMonthlyRecapLinks(params: {
 
   // Pull a page of rows (typically under 100/board column); filter client-side
   const res = await notion.databases.query({ database_id: dbId, page_size: 100 });
+  console.log(`[getMonthlyRecapLinks] Searching for community="${params.communityName}" month="${params.monthLabel}"`);
+  console.log(`[getMonthlyRecapLinks] Found ${res.results.length} rows in Monthly Recaps database`);
+  
   for (const page of res.results as any[]) {
     const props = page.properties;
-    // Determine community value from relation or title/text
-    let community: string | null = null;
+    // Determine community value(s) from relation or title/text
+    let communities: string[] = [];
     if (props?.Community?.type === "relation" && Array.isArray(props.Community.relation) && props.Community.relation.length > 0) {
-      community = await getRelatedPageTitle(props.Community.relation[0].id as string);
+      communities = await getRelatedPageTitlesFromRelationProperty(props.Community);
     } else {
-      community = getPlainText(props?.Community) || getTitle(props?.Community);
+      const communityRaw = getPlainText(props?.Community) || getTitle(props?.Community);
+      communities = parseMultipleCommunities(communityRaw);
+      if (communities.length === 0 && communityRaw) communities = [communityRaw];
     }
+    
     // Determine month value (property could be select/date/title/rich_text)
     const month = getMonthLabelFromProperty(props?.["Recap Month"]) || getFirstTitleFromProperties({ RM: props?.["Recap Month"] });
 
-    if ((community || "").trim() === params.communityName.trim() && (month || "").trim() === params.monthLabel.trim()) {
-      const pdfUrl = getUrlOrText(props?.["PDF To Attach"]) || getUrlOrText(props?.PDF) || null;
-      const lookerUrl = getUrlOrText(props?.["Looker Studio Link (From Community)"]) || null;
-      return { pdfUrl, lookerUrl };
+    console.log(`[getMonthlyRecapLinks] Row: communities=${JSON.stringify(communities)} month="${month}"`);
+
+    // Check if this row matches the requested month
+    if ((month || "").trim() !== params.monthLabel.trim()) {
+      continue; // Wrong month, skip this row
     }
+
+    // Check if the requested community is in this row
+    const matchesCommunity = communities.some(
+      c => c.trim().toLowerCase() === params.communityName.trim().toLowerCase()
+    );
+    
+    if (!matchesCommunity) {
+      console.log(`[getMonthlyRecapLinks] No match - community not found in row`);
+      continue; // Community not found in this row
+    }
+
+    console.log(`[getMonthlyRecapLinks] ✓ Found matching row for community="${params.communityName}" month="${params.monthLabel}"`);
+
+    // Extract Looker URL (single URL for all communities)
+    const lookerUrl = getUrlOrText(props?.["Looker Studio Link (From Community)"]) || null;
+
+    // Handle PDF matching
+    let pdfUrl: string | null = null;
+
+    // First, try to get all files from the PDF property
+    const pdfProp = props?.["PDF To Attach"] || props?.PDF;
+    const allPdfFiles = getAllFilesFromProperty(pdfProp);
+    console.log(`[getMonthlyRecapLinks] Found ${allPdfFiles.length} PDF files:`, allPdfFiles.map(f => ({ name: f.name, url: f.url.substring(0, 50) + '...' })));
+
+    if (allPdfFiles.length > 0) {
+      // Multi-file property with one or more PDFs
+      if (communities.length === 1 && allPdfFiles.length === 1) {
+        // Simple case: single community, single PDF
+        pdfUrl = allPdfFiles[0].url;
+      } else if (communities.length > 1 && allPdfFiles.length > 1) {
+        // Multi-community row: try to match by filename
+        pdfUrl = matchPdfToCommunity(params.communityName, allPdfFiles);
+        
+        // Fallback: position-based matching if name matching fails
+        if (!pdfUrl && communities.length === allPdfFiles.length) {
+          const communityIndex = communities.findIndex(
+            c => c.trim().toLowerCase() === params.communityName.trim().toLowerCase()
+          );
+          if (communityIndex >= 0 && communityIndex < allPdfFiles.length) {
+            pdfUrl = allPdfFiles[communityIndex].url;
+          }
+        }
+      } else if (allPdfFiles.length === 1) {
+        // Multiple communities but only one PDF (use it for all)
+        pdfUrl = allPdfFiles[0].url;
+      } else {
+        // Try name matching regardless
+        pdfUrl = matchPdfToCommunity(params.communityName, allPdfFiles);
+      }
+    }
+
+    // Fallback: try the old getUrlOrText method (for URL or text fields)
+    if (!pdfUrl) {
+      pdfUrl = getUrlOrText(pdfProp);
+      if (pdfUrl) console.log(`[getMonthlyRecapLinks] Found PDF via getUrlOrText fallback`);
+    }
+
+    console.log(`[getMonthlyRecapLinks] Returning: pdfUrl=${pdfUrl ? pdfUrl.substring(0, 50) + '...' : null}, lookerUrl=${lookerUrl ? lookerUrl.substring(0, 50) + '...' : null}`);
+    return { pdfUrl, lookerUrl };
   }
+  console.log(`[getMonthlyRecapLinks] No matching row found`);
   return null;
 }
 
