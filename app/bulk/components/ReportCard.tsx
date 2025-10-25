@@ -86,18 +86,21 @@ export default function ReportCard({ state, notionPageId }: Props) {
       {state.markdown && (
         <div style={{ marginTop: 8 }}>
           <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <button onClick={copy}>Copy .md</button>
             <button onClick={copyClientHtml}>Copy Client Version</button>
+            <button onClick={download}>Download .md</button>
             <button onClick={postToNotion} disabled={!notionPageId}>Post as Comment</button>
             <button onClick={postBlocksToNotion} disabled={!notionPageId}>Post Client Style</button>
           </div>
-          <ClientPreview markdown={state.markdown} />
+          <PreviewTabs markdown={state.markdown} />
         </div>
       )}
     </div>
   );
 }
 
-function ClientPreview({ markdown }: { markdown: string }) {
+function PreviewTabs({ markdown }: { markdown: string }) {
+  const [tab, setTab] = React.useState<"md" | "client">("client");
   const [html, setHtml] = React.useState<string>("");
   React.useEffect(() => {
     let mounted = true;
@@ -112,8 +115,21 @@ function ClientPreview({ markdown }: { markdown: string }) {
   }, [markdown]);
 
   return (
-    <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 0, overflow: "hidden" }}>
-      <iframe sandbox="allow-same-origin" style={{ width: "100%", height: 360, border: "none", background: "white" }} srcDoc={html} />
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <button onClick={() => setTab("client")} disabled={tab === "client"}>Client Preview</button>
+        <button onClick={() => setTab("md")} disabled={tab === "md"}>Markdown</button>
+      </div>
+      {tab === "client" ? (
+        <div
+          style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, overflow: "auto", background: "white", minHeight: 360 }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <div style={{ whiteSpace: "pre-wrap", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace", fontSize: 13, border: "1px solid #eee", borderRadius: 6, padding: 12 }}>
+          {markdown}
+        </div>
+      )}
     </div>
   );
 }

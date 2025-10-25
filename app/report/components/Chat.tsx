@@ -272,8 +272,10 @@ export default function Chat() {
               <h3 style={{ margin: "8px 0" }}>Draft Report</h3>
               <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                 <button onClick={copyClientHtml} style={{ padding: "6px 10px" }}>Copy Client Version</button>
+                <button onClick={copyMarkdown} style={{ padding: "6px 10px" }}>Copy .md</button>
+                <button onClick={downloadMarkdown} style={{ padding: "6px 10px" }}>Download .md</button>
               </div>
-              <ClientOnlyPreview markdown={result.markdown_report as string} />
+              <ChatPreviewTabs markdown={result.markdown_report as string} />
             </div>
           )}
         </div>
@@ -282,7 +284,7 @@ export default function Chat() {
   );
 }
 
-function ClientOnlyPreview({ markdown }: { markdown: string }) {
+function ChatPreviewTabs({ markdown }: { markdown: string }) {
   const [tab, setTab] = React.useState<"client" | "md">("client");
   const [html, setHtml] = React.useState<string>("");
   React.useEffect(() => {
@@ -299,9 +301,20 @@ function ClientOnlyPreview({ markdown }: { markdown: string }) {
 
   return (
     <div>
-      <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 0, overflow: "hidden" }}>
-        <iframe sandbox="allow-same-origin" style={{ width: "100%", height: 420, border: "none", background: "white" }} srcDoc={html} />
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <button onClick={() => setTab("client")} disabled={tab === "client"}>Client Preview</button>
+        <button onClick={() => setTab("md")} disabled={tab === "md"}>Markdown</button>
       </div>
+      {tab === "client" ? (
+        <div
+          style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, overflow: "auto", background: "white", minHeight: 420 }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <div style={{ background: "#f8fafc", padding: 12, borderRadius: 8 }}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+        </div>
+      )}
     </div>
   );
 }
