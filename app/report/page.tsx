@@ -11,9 +11,6 @@ export default function ReportPage() {
       <div style={{ margin: "16px 0" }}>
         <Chat />
       </div>
-      <p>
-        <Link href="/">Home</Link>
-      </p>
     </main>
   );
 }

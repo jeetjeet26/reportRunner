@@ -35,6 +35,20 @@ export default function Chat() {
     } catch {}
   }
 
+  async function copyClientHtml() {
+    if (!result?.markdown_report) return;
+    try {
+      const { markdownToClientHtml } = await import("@/lib/format");
+      const html = markdownToClientHtml(result.markdown_report as string);
+      const blob = new Blob([html], { type: "text/html" });
+      const data = [new ClipboardItem({ "text/html": blob, "text/plain": new Blob([result.markdown_report as string], { type: "text/plain" }) })];
+      // @ts-ignore
+      await navigator.clipboard.write(data);
+      setStatus("Copied client version to clipboard.");
+      setTimeout(() => setStatus(null), 2000);
+    } catch {}
+  }
+
   function downloadMarkdown() {
     if (!result?.markdown_report) return;
     const blob = new Blob([result.markdown_report as string], { type: "text/markdown;charset=utf-8" });
@@ -255,19 +269,40 @@ export default function Chat() {
           )}
           {result.markdown_report && (
             <div>
-              <h3 style={{ margin: "8px 0" }}>Draft Report (Markdown)</h3>
-              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                <button onClick={copyMarkdown} style={{ padding: "6px 10px" }}>Copy</button>
-                <button onClick={downloadMarkdown} style={{ padding: "6px 10px" }}>Download</button>
+              <h3 style={{ margin: "8px 0" }}>Draft Report</h3>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                <button onClick={copyClientHtml} style={{ padding: "6px 10px" }}>Copy Client Version</button>
               </div>
-              <div style={{ background: "#f8fafc", padding: 12, borderRadius: 8 }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.markdown_report as string}</ReactMarkdown>
-              </div>
+              <ClientOnlyPreview markdown={result.markdown_report as string} />
             </div>
           )}
         </div>
       )}
     </section>
+  );
+}
+
+function ClientOnlyPreview({ markdown }: { markdown: string }) {
+  const [tab, setTab] = React.useState<"client" | "md">("client");
+  const [html, setHtml] = React.useState<string>("");
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { markdownToClientHtml } = await import("@/lib/format");
+        const h = markdownToClientHtml(markdown);
+        if (mounted) setHtml(h);
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, [markdown]);
+
+  return (
+    <div>
+      <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 0, overflow: "hidden" }}>
+        <iframe sandbox="allow-same-origin" style={{ width: "100%", height: 420, border: "none", background: "white" }} srcDoc={html} />
+      </div>
+    </div>
   );
 }
 

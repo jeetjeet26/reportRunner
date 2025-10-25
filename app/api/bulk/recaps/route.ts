@@ -2,7 +2,7 @@ export const runtime = "nodejs";
 
 import { NextRequest } from "next/server";
 import { env } from "@/lib/env";
-import { createNotionPageComment, listRecapsByMonth } from "@/lib/notion";
+import { createNotionPageComment, listRecapsByMonth, postMarkdownAsBlocksToPage } from "@/lib/notion";
 
 export async function GET(req: NextRequest) {
   void env; // validate
@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
   } catch {}
   const pageId = (body?.pageId || body?.rowId || "").trim();
   const markdown = (body?.markdown || "").toString();
+  const mode = String(body?.mode || "comment");
   if (!pageId || !markdown) {
     return new Response(JSON.stringify({ error: "Missing pageId or markdown" }), {
       status: 400,
@@ -54,7 +55,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await createNotionPageComment({ pageId, markdown });
+    if (mode === "blocks") {
+      await postMarkdownAsBlocksToPage({ pageId, markdown });
+    } else {
+      await createNotionPageComment({ pageId, markdown });
+    }
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { "content-type": "application/json" },

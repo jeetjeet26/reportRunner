@@ -1,5 +1,7 @@
 "use client";
 
+import React from "react";
+
 type Props = {
   state: {
     jobId: string;
@@ -26,6 +28,17 @@ export default function ReportCard({ state, notionPageId }: Props) {
     if (!state.markdown) return;
     try { await navigator.clipboard.writeText(state.markdown); } catch {}
   };
+  const copyClientHtml = async () => {
+    if (!state.markdown) return;
+    try {
+      const { markdownToClientHtml } = await import("@/lib/format");
+      const html = markdownToClientHtml(state.markdown);
+      const blob = new Blob([html], { type: "text/html" });
+      const data = [new ClipboardItem({ "text/html": blob, "text/plain": new Blob([state.markdown], { type: "text/plain" }) })];
+      // @ts-ignore
+      await navigator.clipboard.write(data);
+    } catch {}
+  };
   const download = () => {
     if (!state.markdown) return;
     const blob = new Blob([state.markdown], { type: "text/markdown;charset=utf-8" });
@@ -47,6 +60,16 @@ export default function ReportCard({ state, notionPageId }: Props) {
       });
     } catch {}
   };
+  const postBlocksToNotion = async () => {
+    if (!state.markdown || !notionPageId) return;
+    try {
+      await fetch("/api/bulk/recaps", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pageId: notionPageId, markdown: state.markdown, mode: "blocks" }),
+      });
+    } catch {}
+  };
 
   return (
     <div>
@@ -62,18 +85,36 @@ export default function ReportCard({ state, notionPageId }: Props) {
       )}
       {state.markdown && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <button onClick={copy}>Copy</button>
-            <button onClick={download}>Download .md</button>
-            <button onClick={postToNotion} disabled={!notionPageId}>Post to Notion</button>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <button onClick={copyClientHtml}>Copy Client Version</button>
+            <button onClick={postToNotion} disabled={!notionPageId}>Post as Comment</button>
+            <button onClick={postBlocksToNotion} disabled={!notionPageId}>Post Client Style</button>
           </div>
-          <div style={{ whiteSpace: "pre-wrap", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace", fontSize: 13, border: "1px solid #eee", borderRadius: 6, padding: 12 }}>
-            {state.markdown}
-          </div>
+          <ClientPreview markdown={state.markdown} />
         </div>
       )}
     </div>
   );
 }
 
+function ClientPreview({ markdown }: { markdown: string }) {
+  const [html, setHtml] = React.useState<string>("");
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { markdownToClientHtml } = await import("@/lib/format");
+        const h = markdownToClientHtml(markdown);
+        if (mounted) setHtml(h);
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, [markdown]);
+
+  return (
+    <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 0, overflow: "hidden" }}>
+      <iframe sandbox="allow-same-origin" style={{ width: "100%", height: 360, border: "none", background: "white" }} srcDoc={html} />
+    </div>
+  );
+}
 

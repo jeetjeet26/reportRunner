@@ -592,3 +592,61 @@ export async function createNotionPageComment(params: { pageId: string; markdown
     });
   }
 }
+
+// -- Client-style posting: convert markdown to Notion blocks and append to page --
+
+type RichText = { type: "text"; text: { content: string } };
+
+function rt(text: string): RichText[] {
+  const safe = (text || "").slice(0, 1900); // conservative safety per block
+  return [{ type: "text", text: { content: safe } }];
+}
+
+export function markdownToNotionBlocks(markdown: string): any[] {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const blocks: any[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trimEnd();
+    if (!line.trim()) {
+      // blank spacer as divider between sections
+      continue;
+    }
+    if (line.startsWith("### ")) {
+      blocks.push({ type: "heading_3", heading_3: { rich_text: rt(line.slice(4)) } });
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      blocks.push({ type: "heading_2", heading_2: { rich_text: rt(line.slice(3)) } });
+      continue;
+    }
+    if (line.startsWith("# ")) {
+      blocks.push({ type: "heading_1", heading_1: { rich_text: rt(line.slice(2)) } });
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      const item = line.replace(/^[-*]\s+/, "");
+      blocks.push({ type: "bulleted_list_item", bulleted_list_item: { rich_text: rt(item) } });
+      continue;
+    }
+    blocks.push({ type: "paragraph", paragraph: { rich_text: rt(line) } });
+  }
+  // Trim to a reasonable size to avoid API errors
+  return blocks.slice(0, 80);
+}
+
+export async function appendBlocksToPage(params: { pageId: string; blocks: any[] }): Promise<void> {
+  if (!params.blocks || params.blocks.length === 0) return;
+  // Notion API allows up to 100 children per request
+  const chunkSize = 90;
+  for (let i = 0; i < params.blocks.length; i += chunkSize) {
+    const slice = params.blocks.slice(i, i + chunkSize);
+    await notion.blocks.children.append({ block_id: params.pageId, children: slice as any });
+  }
+}
+
+export async function postMarkdownAsBlocksToPage(params: { pageId: string; markdown: string }): Promise<void> {
+  const blocks = markdownToNotionBlocks(params.markdown || "");
+  if (blocks.length === 0) return;
+  await appendBlocksToPage({ pageId: params.pageId, blocks });
+}

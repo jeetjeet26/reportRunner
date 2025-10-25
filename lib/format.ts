@@ -150,5 +150,101 @@ export function polishNarrativeReport(markdown: string): string {
   return polished.trim();
 }
 
+// Basic HTML escape
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
+// Very small markdown → HTML converter tailored to our report shape
+function convertMarkdownToHtmlBody(markdown: string): string {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const out: string[] = [];
+  let inList = false;
+
+  const flushList = () => {
+    if (inList) {
+      out.push("</ul>");
+      inList = false;
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trimEnd();
+    if (!line.trim()) {
+      flushList();
+      out.push("<div class=\"spacer\"></div>");
+      continue;
+    }
+
+    // Headings
+    if (line.startsWith("### ")) {
+      flushList();
+      out.push(`<h3>${escapeInline(line.slice(4))}</h3>`);
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      flushList();
+      out.push(`<h2>${escapeInline(line.slice(3))}</h2>`);
+      continue;
+    }
+    if (line.startsWith("# ")) {
+      flushList();
+      out.push(`<h1>${escapeInline(line.slice(2))}</h1>`);
+      continue;
+    }
+
+    // Bulleted list
+    if (line.match(/^[-*]\s+/)) {
+      if (!inList) {
+        out.push("<ul>");
+        inList = true;
+      }
+      const item = line.replace(/^[-*]\s+/, "");
+      out.push(`<li>${escapeInline(item)}</li>`);
+      continue;
+    }
+
+    // Paragraph
+    flushList();
+    out.push(`<p>${escapeInline(line)}</p>`);
+  }
+  flushList();
+  return out.join("\n");
+
+  function escapeInline(s: string): string {
+    // bold **text**
+    let t = escapeHtml(s);
+    t = t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    // italic *text*
+    t = t.replace(/(^|\s)\*(.+?)\*(?=\s|$)/g, "$1<em>$2</em>");
+    // inline code `code`
+    t = t.replace(/`([^`]+)`/g, "<code>$1</code>");
+    return t;
+  }
+}
+
+// Client-facing styled HTML (inline <style> so copy/paste preserves look)
+export function markdownToClientHtml(markdown: string): string {
+  const body = convertMarkdownToHtmlBody(markdown || "");
+  const style = `
+<style>
+  .client-report { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; line-height: 1.6; color: #0f172a; }
+  .client-report h1 { font-size: 24px; margin: 0 0 12px; font-weight: 700; }
+  .client-report h2 { font-size: 18px; margin: 18px 0 8px; font-weight: 700; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+  .client-report h3 { font-size: 16px; margin: 16px 0 6px; font-weight: 600; color: #0f172a; }
+  .client-report p { margin: 10px 0; }
+  .client-report ul { margin: 8px 0 8px 20px; padding: 0; }
+  .client-report li { margin: 6px 0; }
+  .client-report .spacer { height: 8px; }
+  .client-report code { background: #f1f5f9; padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 90%; }
+  .client-report .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: 12px; font-weight: 600; }
+</style>`;
+  return `<div class=\"client-report\">${body}</div>${style}`;
+}
 
