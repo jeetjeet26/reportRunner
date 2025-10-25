@@ -27,7 +27,7 @@ export default function BulkRunner() {
   const [recaps, setRecaps] = useState<Recap[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [jobs, setJobs] = useState<Record<string, JobState>>({});
-  const [concurrency, setConcurrency] = useState<number>(3);
+  const [concurrency] = useState<number>(3);
   const esRef = useRef<EventSource | null>(null);
   const [loadingMonths, setLoadingMonths] = useState<boolean>(false);
   const [loadingRecaps, setLoadingRecaps] = useState<boolean>(false);
@@ -138,10 +138,6 @@ export default function BulkRunner() {
         </label>
         <button onClick={selectAll} disabled={recaps.length === 0}>Select All</button>
         <button onClick={clearAll} disabled={selected.size === 0}>Clear</button>
-        <label>
-          Concurrency:{" "}
-          <input type="number" min={1} max={5} value={concurrency} onChange={e => setConcurrency(Math.max(1, Math.min(5, Number(e.target.value) || 3)))} style={{ width: 60 }} />
-        </label>
         <button onClick={startRun} disabled={!month || selected.size === 0}>Start</button>
         <button onClick={stopRun} disabled={!esRef.current}>Stop</button>
       </div>

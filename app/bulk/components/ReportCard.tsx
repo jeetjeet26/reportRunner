@@ -86,11 +86,8 @@ export default function ReportCard({ state, notionPageId }: Props) {
       {state.markdown && (
         <div style={{ marginTop: 8 }}>
           <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-            <button onClick={copy}>Copy .md</button>
             <button onClick={copyClientHtml}>Copy Client Version</button>
-            <button onClick={download}>Download .md</button>
-            <button onClick={postToNotion} disabled={!notionPageId}>Post as Comment</button>
-            <button onClick={postBlocksToNotion} disabled={!notionPageId}>Post Client Style</button>
+            <button onClick={postBlocksToNotion} disabled={!notionPageId}>Post to Notion Comment</button>
           </div>
           <PreviewTabs markdown={state.markdown} />
         </div>
@@ -116,10 +113,7 @@ function PreviewTabs({ markdown }: { markdown: string }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-        <button onClick={() => setTab("client")} disabled={tab === "client"}>Client Preview</button>
-        <button onClick={() => setTab("md")} disabled={tab === "md"}>Markdown</button>
-      </div>
+      
       {tab === "client" ? (
         <div
           style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, overflow: "auto", background: "white", minHeight: 360 }}

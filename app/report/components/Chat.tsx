@@ -272,8 +272,6 @@ export default function Chat() {
               <h3 style={{ margin: "8px 0" }}>Draft Report</h3>
               <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                 <button onClick={copyClientHtml} style={{ padding: "6px 10px" }}>Copy Client Version</button>
-                <button onClick={copyMarkdown} style={{ padding: "6px 10px" }}>Copy .md</button>
-                <button onClick={downloadMarkdown} style={{ padding: "6px 10px" }}>Download .md</button>
               </div>
               <ChatPreviewTabs markdown={result.markdown_report as string} />
             </div>
@@ -301,10 +299,7 @@ function ChatPreviewTabs({ markdown }: { markdown: string }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-        <button onClick={() => setTab("client")} disabled={tab === "client"}>Client Preview</button>
-        <button onClick={() => setTab("md")} disabled={tab === "md"}>Markdown</button>
-      </div>
+      
       {tab === "client" ? (
         <div
           style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, overflow: "auto", background: "white", minHeight: 420 }}
