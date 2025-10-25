@@ -11,10 +11,11 @@ type Props = {
     markdown?: string;
     error?: string;
   };
+  onChangeMarkdown?: (jobId: string, next: string) => void;
   notionPageId?: string; // Monthly Recaps row id
 };
 
-export default function ReportCard({ state, notionPageId }: Props) {
+export default function ReportCard({ state, onChangeMarkdown, notionPageId }: Props) {
   const phasePct = (() => {
     const order = ["Finding client", "Locating PDF", "Extracting", "Drafting"];
     const idx = state.phase ? order.indexOf(state.phase) : -1;
@@ -24,6 +25,9 @@ export default function ReportCard({ state, notionPageId }: Props) {
     const base = Math.max(0, idx) / order.length;
     return Math.min(95, Math.round(base * 100));
   })();
+  const progressColor = state.status === "error"
+    ? "#b00020"
+    : `hsl(${Math.round((phasePct / 100) * 120)}, 80%, 45%)`;
   const copy = async () => {
     if (!state.markdown) return;
     try { await navigator.clipboard.writeText(state.markdown); } catch {}
@@ -78,7 +82,7 @@ export default function ReportCard({ state, notionPageId }: Props) {
       </div>
       {/* Progress bar */}
       <div style={{ marginTop: 6, height: 6, background: "#eee", borderRadius: 4, overflow: "hidden" }}>
-        <div style={{ width: `${phasePct}%`, height: "100%", background: state.status === "error" ? "#b00020" : "#1976d2", transition: "width 200ms ease" }} />
+        <div style={{ width: `${phasePct}%`, height: "100%", background: progressColor, transition: "width 200ms ease, background 200ms linear" }} />
       </div>
       {state.error && (
         <div style={{ color: "#b00020", marginTop: 4 }}>Error: {state.error}</div>
@@ -89,14 +93,17 @@ export default function ReportCard({ state, notionPageId }: Props) {
             <button onClick={copyClientHtml}>Copy Client Version</button>
             <button onClick={postBlocksToNotion} disabled={!notionPageId}>Post to Notion Comment</button>
           </div>
-          <PreviewTabs markdown={state.markdown} />
+          <PreviewTabs
+            markdown={state.markdown}
+            onChange={(v) => onChangeMarkdown && onChangeMarkdown(state.jobId, v)}
+          />
         </div>
       )}
     </div>
   );
 }
 
-function PreviewTabs({ markdown }: { markdown: string }) {
+function PreviewTabs({ markdown, onChange }: { markdown: string; onChange?: (v: string) => void }) {
   const [tab, setTab] = React.useState<"md" | "client">("client");
   const [html, setHtml] = React.useState<string>("");
   React.useEffect(() => {
@@ -114,15 +121,25 @@ function PreviewTabs({ markdown }: { markdown: string }) {
   return (
     <div>
       
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: "#666" }}>{tab === "client" ? "Preview" : "Editing markdown"}</div>
+        {tab === "client" ? (
+          <button onClick={() => setTab("md")} style={{ padding: "6px 10px" }}>Edit</button>
+        ) : (
+          <button onClick={() => setTab("client")} style={{ padding: "6px 10px" }}>Save</button>
+        )}
+      </div>
       {tab === "client" ? (
         <div
           style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, overflow: "auto", background: "white", minHeight: 360 }}
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <div style={{ whiteSpace: "pre-wrap", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace", fontSize: 13, border: "1px solid #eee", borderRadius: 6, padding: 12 }}>
-          {markdown}
-        </div>
+        <textarea
+          value={markdown}
+          onChange={(e) => onChange && onChange(e.target.value)}
+          style={{ width: "100%", minHeight: 360, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace", fontSize: 13, padding: 12, border: "1px solid #eee", borderRadius: 6, background: "#fff" }}
+        />
       )}
     </div>
   );

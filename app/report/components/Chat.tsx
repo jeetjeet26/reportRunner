@@ -12,6 +12,7 @@ export default function Chat() {
   const [clarification, setClarification] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string>("");
   const [result, setResult] = useState<any>(null);
+  const [editedMarkdown, setEditedMarkdown] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [pill, setPill] = useState<PillState | null>(null);
   const [clarifyAnswer, setClarifyAnswer] = useState("");
@@ -20,6 +21,7 @@ export default function Chat() {
     setPrompt("");
     setPdfUrl("");
     setResult(null);
+    setEditedMarkdown("");
     setError(null);
     setClarification(null);
     setPill(null);
@@ -27,21 +29,23 @@ export default function Chat() {
   }
 
   async function copyMarkdown() {
-    if (!result?.markdown_report) return;
+    const text = editedMarkdown || (result?.markdown_report as string) || "";
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(result.markdown_report as string);
+      await navigator.clipboard.writeText(text);
       setStatus("Copied markdown to clipboard.");
       setTimeout(() => setStatus(null), 2000);
     } catch {}
   }
 
   async function copyClientHtml() {
-    if (!result?.markdown_report) return;
+    const text = editedMarkdown || (result?.markdown_report as string) || "";
+    if (!text) return;
     try {
       const { markdownToClientHtml } = await import("@/lib/format");
-      const html = markdownToClientHtml(result.markdown_report as string);
+      const html = markdownToClientHtml(text);
       const blob = new Blob([html], { type: "text/html" });
-      const data = [new ClipboardItem({ "text/html": blob, "text/plain": new Blob([result.markdown_report as string], { type: "text/plain" }) })];
+      const data = [new ClipboardItem({ "text/html": blob, "text/plain": new Blob([text], { type: "text/plain" }) })];
       // @ts-ignore
       await navigator.clipboard.write(data);
       setStatus("Copied client version to clipboard.");
@@ -50,8 +54,9 @@ export default function Chat() {
   }
 
   function downloadMarkdown() {
-    if (!result?.markdown_report) return;
-    const blob = new Blob([result.markdown_report as string], { type: "text/markdown;charset=utf-8" });
+    const text = editedMarkdown || (result?.markdown_report as string) || "";
+    if (!text) return;
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -118,6 +123,7 @@ export default function Chat() {
             try {
               const data = JSON.parse(String(ev.data || "{}"));
               setResult(data);
+              if (data?.markdown_report) setEditedMarkdown(String(data.markdown_report));
               setPill("Done");
               setStatus(null);
             } catch {}
@@ -169,6 +175,7 @@ export default function Chat() {
       if (data?.extraction_json && !data?.markdown_report) setPill("Drafting");
       else setPill("Done");
       setResult(data);
+      if (data?.markdown_report) setEditedMarkdown(String(data.markdown_report));
       setStatus(null);
     } catch (err: any) {
       setError(String(err?.message || err) || "Unknown error");
@@ -273,7 +280,7 @@ export default function Chat() {
               <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                 <button onClick={copyClientHtml} style={{ padding: "6px 10px" }}>Copy Client Version</button>
               </div>
-              <ChatPreviewTabs markdown={result.markdown_report as string} />
+              <ChatPreviewTabs value={editedMarkdown} onChange={setEditedMarkdown} />
             </div>
           )}
         </div>
@@ -282,7 +289,7 @@ export default function Chat() {
   );
 }
 
-function ChatPreviewTabs({ markdown }: { markdown: string }) {
+function ChatPreviewTabs({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [tab, setTab] = React.useState<"client" | "md">("client");
   const [html, setHtml] = React.useState<string>("");
   React.useEffect(() => {
@@ -290,25 +297,34 @@ function ChatPreviewTabs({ markdown }: { markdown: string }) {
     (async () => {
       try {
         const { markdownToClientHtml } = await import("@/lib/format");
-        const h = markdownToClientHtml(markdown);
+        const h = markdownToClientHtml(value);
         if (mounted) setHtml(h);
       } catch {}
     })();
     return () => { mounted = false; };
-  }, [markdown]);
+  }, [value]);
 
   return (
     <div>
-      
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: "#666" }}>{tab === "client" ? "Preview" : "Editing markdown"}</div>
+        {tab === "client" ? (
+          <button onClick={() => setTab("md")} style={{ padding: "6px 10px" }}>Edit</button>
+        ) : (
+          <button onClick={() => setTab("client")} style={{ padding: "6px 10px" }}>Save</button>
+        )}
+      </div>
       {tab === "client" ? (
         <div
           style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, overflow: "auto", background: "white", minHeight: 420 }}
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <div style={{ background: "#f8fafc", padding: 12, borderRadius: 8 }}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
-        </div>
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ width: "100%", minHeight: 420, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace", fontSize: 13, padding: 12, border: "1px solid #eee", borderRadius: 6, background: "#fff" }}
+        />
       )}
     </div>
   );

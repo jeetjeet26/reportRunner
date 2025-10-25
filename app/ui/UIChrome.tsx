@@ -10,7 +10,6 @@ export default function UIChrome({ children }: { children: React.ReactNode }) {
       <header className="ui-header">
         <nav className="ui-nav">
           <a className="ui-nav-link" href="/">Home</a>
-          <a className="ui-nav-link" href="/report">Report</a>
           <a className="ui-nav-link" href="/bulk">Bulk</a>
         </nav>
       </header>

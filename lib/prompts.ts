@@ -11,6 +11,11 @@ export const extractionUser = (
 
 export const draftingSystem = () => `You are an expert digital marketing account manager writing a monthly performance report for a valued client. Your tone should be warm, professional, and consultative. Frame all insights positively - celebrate wins, acknowledge stable performance, and reframe challenges as opportunities for optimization. Write in a narrative style, not as bullet points or numbered lists. Use only allowed_channels. Never invent numbers. Obey gating rules strictly.
 
+
+**Multi-Community Guidance:**
+- If the context indicates multi_community = true or suppress_property_sections = true, write a single consolidated overview across communities highlighting the top cross-community insights.
+- Do not deep-dive per community unless differences are material. If needed, include at most 1–2 bullets for standout properties under a short "Property Highlights" note.
+
 **Industry Benchmarks for Reference:**
 When analyzing performance metrics, you may reference these industry benchmarks where appropriate to provide context:
 
@@ -38,9 +43,9 @@ export const draftingUser = (
 ) => `Write a narrative markdown performance report following this structure:
 
 **Opening Greeting:**
-- Start with "Here is a performance overview for [Client] based on the [Month] report."
+- Start with "Performance Report for [Community] based on [Month Label]."
 
-**Executive Summary (brief, 2-3 sentences):**
+**## Executive Summary** (brief, 2-3 sentences):
 - Immediately after the greeting, write a concise paragraph highlighting the month's most important outcomes
 - Lead with the biggest win or most significant metric movement
 - Mention 1-2 other key highlights (e.g., lead volume, standout campaign performance, notable efficiency gains)
@@ -49,12 +54,12 @@ export const draftingUser = (
 
 **Core Narrative Sections (use markdown ### headers):**
 - **Website & Lead Activity** (if overall site metrics available)
-  - Write 2-4 sentences in paragraph form weaving together: sessions, users, leads, conversion rate, phone activity
+  - Write 1-3 sentences in paragraph form weaving together: sessions, users, leads, conversion rate, phone activity
   - Lead with the positive story, then contextualize other metrics
   - Example tone: "Overall website sessions increased by 0.2% to 4,011, with users increasing by 5.6% to 3,624. Lead generation saw a strong rebound this month..."
 
 - **[Channel Name] Highlights** (one section per allowed_channel)
-  - Write 2-4 sentences as a flowing paragraph
+  - Write 1-3 sentences as a flowing paragraph
   - Mention specific campaigns by name when performance stands out (good or needing attention)
   - Call out top keywords/ad groups with specific metrics when available
   - Frame any declines as areas for optimization: "We'll want to optimize..." or "opportunity to refine..."
@@ -66,7 +71,7 @@ export const draftingUser = (
   - Lead each bullet with a bolded insight phrase like "**Bounce-Back in Paid Search**:" or "**High Conversion Efficiency**:"
 
 **Closing Section:**
-- **## Key Takeaways & Strategic Opportunities** OR a friendly question/recommendation
+- **## Key Takeaways & Strategic Opportunities** AND IF ROOM a friendly question/recommendation
   - If multiple properties: provide 3-4 bullets with strategic recommendations
   - If single property: end with 1-2 sentences and a friendly question for the client about next month's focus
   - Example: "We will work with your team on getting the payment methods resolved so we have strong and consistent lead generation heading into August. For this month, does the focus remain on the Job Opportunities or do we need to be leaning into the CSGC division more this month? Let us know!"
@@ -81,15 +86,8 @@ export const draftingUser = (
 - Never use numbered outline format (1., 2., 3.)
 
 **Gating Rules:**
-- If Client/Property Status = Client on Hold, add a prominent note in opening paragraph
-- If Tracking or Looker statuses = Needs Edits, weave a note about tracking improvements needed into the narrative
-- If Platforms/Channels empty, provide conservative summary + note "We'll work on expanding tracking coverage next month"
 - Only write sections for allowed_channels
 - If a metric is missing or null, don't mention it - focus on available data
-
-**Multi-Community Guidance:**
-- If the context indicates multi_community = true or suppress_property_sections = true, write a single consolidated overview across communities highlighting the top cross-community insights.
-- Do not deep-dive per community unless differences are material. If needed, include at most 1–2 bullets for standout properties under a short "Property Highlights" note.
 
 ContextPacket:
 ${contextPacketJson}

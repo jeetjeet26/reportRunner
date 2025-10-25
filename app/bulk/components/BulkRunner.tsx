@@ -118,28 +118,69 @@ export default function BulkRunner() {
     }
   };
 
+  const onChangeMarkdown = (jobId: string, next: string) => {
+    setJobs(prev => {
+      const current = prev[jobId] || { jobId, label: "", status: "pending" as const };
+      return { ...prev, [jobId]: { ...current, markdown: next } };
+    });
+  };
+
   const selectedRecaps = useMemo(() => recaps.filter(r => selected.has(r.jobId)), [recaps, selected]);
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <label>
-          Month:{" "}
-          {loadingMonths ? (
-            <span style={{ color: "#666" }}>Loading months…</span>
-          ) : (
-            <select value={month} onChange={e => { const m = e.target.value; setMonth(m); void loadRecaps(m); }}>
-              <option value="">Select a month…</option>
-              {months.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          )}
-        </label>
-        <button onClick={selectAll} disabled={recaps.length === 0}>Select All</button>
-        <button onClick={clearAll} disabled={selected.size === 0}>Clear</button>
-        <button onClick={startRun} disabled={!month || selected.size === 0}>Start</button>
-        <button onClick={stopRun} disabled={!esRef.current}>Stop</button>
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <label>
+            Month:{" "}
+            {loadingMonths ? (
+              <span style={{ color: "#666" }}>Loading months…</span>
+            ) : (
+              <select value={month} onChange={e => { const m = e.target.value; setMonth(m); void loadRecaps(m); }}>
+                <option value="">Select a month…</option>
+                {months.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            )}
+          </label>
+          <button onClick={selectAll} disabled={recaps.length === 0}>Select All</button>
+          <button onClick={clearAll} disabled={selected.size === 0}>Clear</button>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
+          <button
+            onClick={startRun}
+            disabled={!month || selected.size === 0}
+            style={{
+              padding: "10px 16px",
+              fontSize: 14,
+              backgroundColor: "#22c55e",
+              color: "#ffffff",
+              border: "1px solid #16a34a",
+              borderRadius: 8,
+              cursor: (!month || selected.size === 0) ? "not-allowed" : "pointer",
+              opacity: (!month || selected.size === 0) ? 0.6 : 1,
+            }}
+          >
+            Start
+          </button>
+          <button
+            onClick={stopRun}
+            disabled={!esRef.current}
+            style={{
+              padding: "10px 16px",
+              fontSize: 14,
+              backgroundColor: "#ef4444",
+              color: "#ffffff",
+              border: "1px solid #dc2626",
+              borderRadius: 8,
+              cursor: (!esRef.current) ? "not-allowed" : "pointer",
+              opacity: (!esRef.current) ? 0.6 : 1,
+            }}
+          >
+            Stop
+          </button>
+        </div>
       </div>
 
       <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
@@ -159,7 +200,7 @@ export default function BulkRunner() {
             </div>
             {jobs[r.jobId] && (
               <div style={{ marginTop: 8 }}>
-                <ReportCard state={jobs[r.jobId]} notionPageId={r.rowId} />
+                <ReportCard state={jobs[r.jobId]} notionPageId={r.rowId} onChangeMarkdown={onChangeMarkdown} />
               </div>
             )}
           </div>
