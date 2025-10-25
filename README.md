@@ -70,11 +70,17 @@ Write analytics report for Acme Midtown for July 2025
 - Endpoints:
   - `GET /api/bulk/months` → `{ months: string[] }`
   - `GET /api/bulk/recaps?month=...` → `{ recaps: { jobId, rowId, communities, pdfUrls, lookerUrl, descriptor }[] }`
-  - `GET /api/bulk/stream?month=...&ids=...&concurrency=3` → SSE events interleaved across jobs
+  - `GET /api/bulk/stream?month=...&ids=...&concurrency=3&sessions=...` → SSE events interleaved across jobs; optional `sessions` maps `rowId`→`sessionId` for locally uploaded PDFs
 - UI behavior:
   - Pick a month, list recap rows, select any subset
   - Start one SSE stream to process jobs in parallel (default 3)
   - Each job card shows compact status and final markdown with copy/download
+  - If Notion provides fewer PDFs than required (one per community), upload the missing PDFs per row. Selection is disabled until the combined count (Notion + uploads) meets the requirement
+
+#### Local uploads for bulk
+- Missing PDFs can be uploaded directly in the bulk UI. The app creates a short‑lived upload session and stores files in the OS temp directory under `reportRunner_uploads/<sessionId>`.
+- The bulk SSE endpoint accepts an optional `sessions` query param (URL‑encoded JSON) mapping `rowId` to the corresponding upload `sessionId`. Uploaded PDFs are included alongside Notion URLs for extraction.
+- Sessions expire after a configurable TTL (default 10 minutes). Files are kept only in temp storage and are cleaned up when sessions are deleted or after processing.
 
 ## API
 - **Streaming (recommended)**
@@ -100,6 +106,23 @@ curl -N "http://localhost:3000/api/report/stream?prompt=Write%20analytics%20repo
 }
 ```
   - May return `{ clarification, intent }` if the prompt lacks client or month.
+
+### Uploads (bulk helper)
+Use these endpoints to manage short‑lived upload sessions when Notion is missing some PDFs for a bulk row. Files are stored in temp storage and never persisted.
+
+- `POST /api/uploads/session`
+  - Body: `{ "rowId": string, "requiredTotal": number, "notionPdfCount": number, "ttlMinutes"?: number }`
+  - Response: `{ "sessionId": string, "expiresAt": number }`
+
+- `GET /api/uploads/session/[sessionId]`
+  - Response: `{ sessionId, rowId, requiredTotal, notionPdfCount, uploadedCount, files: { name, size }[], expired, canSelect, remainingMissing, expiresAt }`
+
+- `POST /api/uploads/session/[sessionId]/file`
+  - `multipart/form-data` with field `file` (PDF, max 25 MB)
+  - Response: `{ uploadedCount, canSelect }`
+
+- `DELETE /api/uploads/session/[sessionId]`
+  - Deletes session manifest and any uploaded temp files
 
 ## Configuration Details
 - Environment validation is enforced on first request in `lib/env.ts`.

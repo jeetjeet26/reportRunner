@@ -9,6 +9,8 @@ import { extractFromPdfToJson, draftMarkdownReport } from "@/lib/claude";
 import { gateChannelsInMarkdown, polishNarrativeReport } from "@/lib/format";
 import { logEvent } from "@/lib/logger";
 import fs from "fs";
+import os from "os";
+import path from "path";
 
 type Job = {
   jobId: string;
@@ -30,6 +32,12 @@ export async function GET(req: NextRequest) {
   const idsCsv = (searchParams.get("ids") || "").trim();
   const concurrencyParam = Number(searchParams.get("concurrency") || "3");
   const concurrency = Number.isFinite(concurrencyParam) && concurrencyParam > 0 ? Math.min(concurrencyParam, 5) : 3;
+  // Optional: mapping of rowId -> upload sessionId for including locally uploaded PDFs
+  let sessionMap: Record<string, string> = {};
+  const sessionsParam = searchParams.get("sessions");
+  if (sessionsParam) {
+    try { sessionMap = JSON.parse(decodeURIComponent(sessionsParam)); } catch {}
+  }
 
   const stream = new TransformStream();
   const writer = stream.writable.getWriter();
@@ -80,6 +88,24 @@ export async function GET(req: NextRequest) {
         }
       };
 
+      // Helpers to read an upload manifest from tmp by sessionId
+      function readUploadManifest(sessionId: string): null | {
+        files: Array<{ name: string; localPath: string; size: number }>; requiredTotal: number; notionPdfCount: number; uploadedCount: number; expiresAt: number;
+      } {
+        try {
+          const p = path.join(os.tmpdir(), "reportRunner_uploads", sessionId, "manifest.json");
+          const raw = fs.readFileSync(p, "utf8");
+          const m = JSON.parse(raw);
+          return {
+            files: (m?.files || []).map((f: any) => ({ name: String(f.name || "upload.pdf"), localPath: String(f.localPath || ""), size: Number(f.size || 0) })),
+            requiredTotal: Number(m?.requiredTotal || 0),
+            notionPdfCount: Number(m?.notionPdfCount || 0),
+            uploadedCount: Number(m?.uploadedCount || 0),
+            expiresAt: Number(m?.expiresAt || 0),
+          };
+        } catch { return null; }
+      }
+
       async function runJob(job: Job) {
         const { jobId, communities, pdfUrls, lookerUrl } = job;
         try {
@@ -128,7 +154,7 @@ export async function GET(req: NextRequest) {
 
           await send("job_phase", { jobId, phase: "Locating PDF" });
 
-          // Determine candidate PDFs
+          // Determine candidate PDFs (remote URLs) and include any locally uploaded PDFs for this row
           const candidateUrls: string[] = [];
           for (const u of pdfUrls) {
             if (await isDirectPdfUrl(u)) candidateUrls.push(u);
@@ -142,6 +168,20 @@ export async function GET(req: NextRequest) {
               if (c.looker && await isDirectPdfUrl(c.looker)) candidateUrls.push(c.looker);
             }
           }
+          // Local uploaded PDFs via session
+          const sessionIdForRow = sessionMap[jobId];
+          let uploadedFiles: Array<{ name: string; localPath: string }> = [];
+          if (sessionIdForRow) {
+            const man = readUploadManifest(sessionIdForRow);
+            if (man && Date.now() <= man.expiresAt) {
+              uploadedFiles = man.files.filter(f => f.localPath && fs.existsSync(f.localPath));
+              // Represent local files as pseudo-urls
+              for (let i = 0; i < uploadedFiles.length; i++) {
+                const pseudo = `local:${i}:${uploadedFiles[i].name}`;
+                candidateUrls.push(pseudo);
+              }
+            }
+          }
           if (candidateUrls.length === 0) {
             await send("job_error", { jobId, message: "No direct PDF found" });
             return;
@@ -151,9 +191,14 @@ export async function GET(req: NextRequest) {
           const filesForMatching = candidateUrls.map(url => {
             let name = "";
             try {
-              const u = new URL(url);
-              const segs = u.pathname.split("/");
-              name = segs[segs.length - 1] || "";
+              if (url.startsWith("local:")) {
+                const parts = url.split(":");
+                name = parts[parts.length - 1] || "";
+              } else {
+                const u = new URL(url);
+                const segs = u.pathname.split("/");
+                name = segs[segs.length - 1] || "";
+              }
             } catch {}
             return { url, name };
           });
@@ -183,16 +228,26 @@ export async function GET(req: NextRequest) {
             communityToUrls.set(community, [...candidateUrls]);
           }
 
-          // Download all unique PDFs once
+          // Download all unique PDFs once, skipping local pseudo-urls
           const uniqueUrls = Array.from(new Set(candidateUrls));
           const urlToTmpPath = new Map<string, string>();
           const tmpPathsAll: string[] = [];
           try {
             for (let i = 0; i < uniqueUrls.length; i++) {
-              const base = `${clientRecords[0]?.name || communities[0]}-${month}-${i + 1}`;
-              const p = await downloadPdfToTmp(uniqueUrls[i], base);
-              urlToTmpPath.set(uniqueUrls[i], p);
-              tmpPathsAll.push(p);
+              const id = uniqueUrls[i];
+              if (id.startsWith("local:")) {
+                // Resolve to the uploaded local file path
+                const idx = Number(id.split(":")[1] || 0);
+                const f = uploadedFiles[idx];
+                if (f && f.localPath) {
+                  urlToTmpPath.set(id, f.localPath);
+                }
+              } else {
+                const base = `${clientRecords[0]?.name || communities[0]}-${month}-${i + 1}`;
+                const p = await downloadPdfToTmp(id, base);
+                urlToTmpPath.set(id, p);
+                tmpPathsAll.push(p);
+              }
             }
 
             await send("job_phase", { jobId, phase: "Extracting" });

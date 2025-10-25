@@ -31,6 +31,8 @@ export default function BulkRunner() {
   const esRef = useRef<EventSource | null>(null);
   const [loadingMonths, setLoadingMonths] = useState<boolean>(false);
   const [loadingRecaps, setLoadingRecaps] = useState<boolean>(false);
+  const [uploadSessions, setUploadSessions] = useState<Record<string, { sessionId: string; status: { uploadedCount: number; requiredTotal: number; notionPdfCount: number; canSelect: boolean; remainingMissing: number; expiresAt: number } | null }>>({});
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -83,7 +85,13 @@ export default function BulkRunner() {
     setJobs(init);
 
     const ids = Array.from(selected).join(",");
-    const url = `/api/bulk/stream?month=${encodeURIComponent(month)}&ids=${encodeURIComponent(ids)}&concurrency=${concurrency}`;
+    // include upload session mapping for selected rows
+    const sessionsMap: Record<string, string> = {};
+    for (const id of Array.from(selected)) {
+      const s = uploadSessions[id]?.sessionId;
+      if (s) sessionsMap[id] = s;
+    }
+    const url = `/api/bulk/stream?month=${encodeURIComponent(month)}&ids=${encodeURIComponent(ids)}&concurrency=${concurrency}&sessions=${encodeURIComponent(JSON.stringify(sessionsMap))}`;
     const es = new EventSource(url);
     esRef.current = es;
 
@@ -126,6 +134,50 @@ export default function BulkRunner() {
   };
 
   const selectedRecaps = useMemo(() => recaps.filter(r => selected.has(r.jobId)), [recaps, selected]);
+
+  // Upload helpers
+  const ensureSession = async (row: Recap) => {
+    const existing = uploadSessions[row.jobId]?.sessionId;
+    if (existing) return existing;
+    const requiredTotal = row.communities.length;
+    const notionPdfCount = Array.isArray(row.pdfUrls) ? row.pdfUrls.filter(Boolean).length : 0;
+    const res = await fetch(`/api/uploads/session`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rowId: row.rowId, requiredTotal, notionPdfCount, ttlMinutes: 10 }) });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error || "Failed to create session");
+    const sessionId = String(json.sessionId);
+    setUploadSessions(prev => ({ ...prev, [row.jobId]: { sessionId, status: null } }));
+    void pollStatus(row.jobId, sessionId);
+    return sessionId;
+  };
+
+  const pollStatus = async (jobId: string, sessionId: string) => {
+    try {
+      const res = await fetch(`/api/uploads/session/${sessionId}`);
+      const json = await res.json();
+      if (res.ok) {
+        setUploadSessions(prev => ({ ...prev, [jobId]: { sessionId, status: json } }));
+      }
+    } catch {}
+  };
+
+  const onUploadFile = async (job: Recap, file: File) => {
+    // Disallow extras: if total already meets required, do nothing
+    const existing = Array.isArray(job.pdfUrls) ? job.pdfUrls.filter(Boolean).length : 0;
+    const status = uploadSessions[job.jobId]?.status;
+    const uploaded = status?.uploadedCount ?? 0;
+    const required = job.communities.length;
+    if (existing + uploaded >= required) return;
+    const sessionId = await ensureSession(job);
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/uploads/session/${sessionId}/file`, { method: "POST", body: fd });
+    const json = await res.json();
+    if (res.ok) {
+      await pollStatus(job.jobId, sessionId);
+    } else {
+      alert(json?.error || "Upload failed");
+    }
+  };
 
   return (
     <div>
@@ -191,13 +243,79 @@ export default function BulkRunner() {
           <div key={r.jobId} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <div>
-                <div style={{ fontWeight: 600 }}>{r.descriptor}</div>
-                <div style={{ color: "#666", fontSize: 12 }}>{r.communities.join(", ")}</div>
+                {(() => {
+                  const status = uploadSessions[r.jobId]?.status;
+                  const existing = Array.isArray(r.pdfUrls) ? r.pdfUrls.filter(Boolean).length : 0;
+                  const uploaded = status?.uploadedCount ?? 0;
+                  const total = existing + uploaded;
+                  const title = `${r.descriptor} — ${total} PDF${total === 1 ? "" : "s"}`;
+                  return (
+                    <>
+                      <div style={{ fontWeight: 600 }}>{title}</div>
+                      <div style={{ color: "#666", fontSize: 12 }}>{r.communities.join(", ")}</div>
+                    </>
+                  );
+                })()}
               </div>
-              <label>
-                <input type="checkbox" checked={selected.has(r.jobId)} onChange={() => toggle(r.jobId)} /> Select
-              </label>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {(() => {
+                  const existing = Array.isArray(r.pdfUrls) ? r.pdfUrls.filter(Boolean).length : 0;
+                  const required = r.communities.length;
+                  const showUpload = existing !== required;
+                  return showUpload ? (
+                    <button onClick={async () => { setExpandedRow(expandedRow === r.jobId ? null : r.jobId); if (!uploadSessions[r.jobId]?.sessionId) { try { await ensureSession(r); } catch {} } }}>
+                      Upload PDF
+                    </button>
+                  ) : null;
+                })()}
+                {(() => {
+                  const status = uploadSessions[r.jobId]?.status;
+                  const required = r.communities.length;
+                  const existing = Array.isArray(r.pdfUrls) ? r.pdfUrls.filter(Boolean).length : 0;
+                  const uploaded = status?.uploadedCount ?? 0;
+                  const canSelect = status ? status.canSelect : (existing >= required);
+                  const disabled = !canSelect;
+                  return (
+                    <label title={disabled ? `Needs ${required} PDFs, have ${existing + uploaded}` : ""}>
+                      <input type="checkbox" checked={selected.has(r.jobId)} onChange={() => toggle(r.jobId)} disabled={disabled} /> Select
+                    </label>
+                  );
+                })()}
+              </div>
             </div>
+            {(() => {
+              const status = uploadSessions[r.jobId]?.status;
+              const required = r.communities.length;
+              const existing = Array.isArray(r.pdfUrls) ? r.pdfUrls.filter(Boolean).length : 0;
+              const uploaded = status?.uploadedCount ?? 0;
+              const total = existing + uploaded;
+              if (total >= required) return null;
+              const missing = required - total;
+              return (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#fbbf24" }}>
+                  Not enough PDFs for {required} communities. Have {total}. Upload {missing} more.
+                </div>
+              );
+            })()}
+            {(() => {
+              const existing = Array.isArray(r.pdfUrls) ? r.pdfUrls.filter(Boolean).length : 0;
+              const required = r.communities.length;
+              const showUpload = existing !== required;
+              return showUpload && expandedRow === r.jobId;
+            })() && (
+              <div style={{ marginTop: 8, padding: 8, background: "#0f172a", color: "#e5e7eb", borderRadius: 6 }}>
+                <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Upload missing PDFs</div>
+                    <div style={{ fontSize: 12, color: "#9ca3af" }}>Choose file(s) to upload. Selection enables automatically when enough PDFs are present.</div>
+                  </div>
+                  <button onClick={() => setExpandedRow(null)}>Close</button>
+                </div>
+                <div>
+                  <input type="file" accept="application/pdf" onChange={e => { const f = e.target.files?.[0]; if (f) void onUploadFile(r, f); e.currentTarget.value = ""; }} />
+                </div>
+              </div>
+            )}
             {jobs[r.jobId] && (
               <div style={{ marginTop: 8 }}>
                 <ReportCard state={jobs[r.jobId]} notionPageId={r.rowId} onChangeMarkdown={onChangeMarkdown} />
