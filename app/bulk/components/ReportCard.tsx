@@ -9,9 +9,10 @@ type Props = {
     markdown?: string;
     error?: string;
   };
+  notionPageId?: string; // Monthly Recaps row id
 };
 
-export default function ReportCard({ state }: Props) {
+export default function ReportCard({ state, notionPageId }: Props) {
   const phasePct = (() => {
     const order = ["Finding client", "Locating PDF", "Extracting", "Drafting"];
     const idx = state.phase ? order.indexOf(state.phase) : -1;
@@ -36,6 +37,17 @@ export default function ReportCard({ state }: Props) {
     URL.revokeObjectURL(url);
   };
 
+  const postToNotion = async () => {
+    if (!state.markdown || !notionPageId) return;
+    try {
+      await fetch("/api/bulk/recaps", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pageId: notionPageId, markdown: state.markdown }),
+      });
+    } catch {}
+  };
+
   return (
     <div>
       <div style={{ fontSize: 12, color: "#555" }}>
@@ -53,6 +65,7 @@ export default function ReportCard({ state }: Props) {
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <button onClick={copy}>Copy</button>
             <button onClick={download}>Download .md</button>
+            <button onClick={postToNotion} disabled={!notionPageId}>Post to Notion</button>
           </div>
           <div style={{ whiteSpace: "pre-wrap", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace", fontSize: 13, border: "1px solid #eee", borderRadius: 6, padding: 12 }}>
             {state.markdown}

@@ -2,7 +2,7 @@ export const runtime = "nodejs";
 
 import { NextRequest } from "next/server";
 import { env } from "@/lib/env";
-import { listRecapsByMonth } from "@/lib/notion";
+import { createNotionPageComment, listRecapsByMonth } from "@/lib/notion";
 
 export async function GET(req: NextRequest) {
   void env; // validate
@@ -33,6 +33,36 @@ export async function GET(req: NextRequest) {
     const msg = String(e?.message || e) || "Unknown error";
     return new Response(JSON.stringify({ error: msg }), {
       status: 500,
+      headers: { "content-type": "application/json" },
+    });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  void env; // validate
+  let body: any = null;
+  try {
+    body = await req.json();
+  } catch {}
+  const pageId = (body?.pageId || body?.rowId || "").trim();
+  const markdown = (body?.markdown || "").toString();
+  if (!pageId || !markdown) {
+    return new Response(JSON.stringify({ error: "Missing pageId or markdown" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  try {
+    await createNotionPageComment({ pageId, markdown });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  } catch (e: any) {
+    const msg = String(e?.message || e) || "Unknown error";
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 502,
       headers: { "content-type": "application/json" },
     });
   }

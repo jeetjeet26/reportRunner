@@ -163,7 +163,7 @@ export default function BulkRunner() {
             </div>
             {jobs[r.jobId] && (
               <div style={{ marginTop: 8 }}>
-                <ReportCard state={jobs[r.jobId]} />
+                <ReportCard state={jobs[r.jobId]} notionPageId={r.rowId} />
               </div>
             )}
           </div>

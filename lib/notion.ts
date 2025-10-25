@@ -556,3 +556,39 @@ export async function listRecapsByMonth(monthLabel: string): Promise<RecapJobDes
   return out;
 }
 
+
+// Create a comment on a Notion page with markdown text. Splits into chunks to respect Notion limits.
+export async function createNotionPageComment(params: { pageId: string; markdown: string }): Promise<void> {
+  const maxChunk = 1800; // conservative under rich_text 2000 limit
+  const chunks: string[] = [];
+  let remaining = params.markdown || "";
+  while (remaining.length > 0) {
+    chunks.push(remaining.slice(0, maxChunk));
+    remaining = remaining.slice(maxChunk);
+  }
+  if (chunks.length === 0) return;
+
+  // Post first chunk as the main comment
+  await notion.comments.create({
+    parent: { page_id: params.pageId },
+    rich_text: [
+      {
+        type: "text",
+        text: { content: chunks[0] },
+      } as any,
+    ],
+  });
+
+  // Post remaining chunks as additional comments to avoid truncation
+  for (let i = 1; i < chunks.length; i++) {
+    await notion.comments.create({
+      parent: { page_id: params.pageId },
+      rich_text: [
+        {
+          type: "text",
+          text: { content: chunks[i] },
+        } as any,
+      ],
+    });
+  }
+}
