@@ -6,7 +6,7 @@ import { listRecapsByMonth, fetchClientByExactCommunity, fetchClientByExactTitle
 import { normalizeChannels, filterExtractionByAllowedChannels } from "@/lib/channels";
 import { downloadPdfToTmp, isDirectPdfUrl } from "@/lib/pdf";
 import { extractFromPdfToJson, draftMarkdownReport } from "@/lib/claude";
-import { gateChannelsInMarkdown, polishNarrativeReport } from "@/lib/format";
+import { gateChannelsInMarkdown, polishNarrativeReport } from "@/lib/formatting";
 import { logEvent } from "@/lib/logger";
 import fs from "fs";
 import os from "os";
@@ -322,6 +322,12 @@ export async function GET(req: NextRequest) {
 
             const filtered = filterExtractionByAllowedChannels(combined, allowed_channels);
 
+            // Also prepare per-community filtered sections for Community Highlights mode
+            const perCommunityFiltered = perCommunity.map(pc => ({
+              community: pc.community,
+              sections: filterExtractionByAllowedChannels(pc.extraction, allowed_channels),
+            }));
+
             await send("job_phase", { jobId, phase: "Drafting" });
 
             const contextPacket = {
@@ -331,6 +337,9 @@ export async function GET(req: NextRequest) {
               allowed_channels,
               multi_community: multipleCommunities,
               suppress_property_sections: multipleCommunities,
+              // Enable Community Highlights mode when more than one PDF is used in generation
+              community_highlights_mode: uniqueUrls.length > 1,
+              per_community: perCommunityFiltered,
             };
 
             let markdown = await draftMarkdownReport({ contextPacketJson: JSON.stringify(contextPacket), extractionJson: JSON.stringify(filtered ?? {}) });

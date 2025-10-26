@@ -42,7 +42,7 @@ export default function Chat() {
     const text = editedMarkdown || (result?.markdown_report as string) || "";
     if (!text) return;
     try {
-      const { markdownToClientHtml } = await import("@/lib/format");
+      const { markdownToClientHtml } = await import("@/lib/formatting");
       const html = markdownToClientHtml(text);
       const blob = new Blob([html], { type: "text/html" });
       const data = [new ClipboardItem({ "text/html": blob, "text/plain": new Blob([text], { type: "text/plain" }) })];
@@ -296,7 +296,7 @@ function ChatPreviewTabs({ value, onChange }: { value: string; onChange: (v: str
     let mounted = true;
     (async () => {
       try {
-        const { markdownToClientHtml } = await import("@/lib/format");
+        const { markdownToClientHtml } = await import("@/lib/formatting");
         const h = markdownToClientHtml(value);
         if (mounted) setHtml(h);
       } catch {}

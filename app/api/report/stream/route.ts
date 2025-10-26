@@ -7,7 +7,7 @@ import { fetchClientByExactTitle, fetchClientByExactCommunity, findFirstPdfUrlFr
 import { normalizeChannels, filterExtractionByAllowedChannels } from "@/lib/channels";
 import { downloadPdfToTmp, isDirectPdfUrl } from "@/lib/pdf";
 import { extractFromPdfToJson, draftMarkdownReport } from "@/lib/claude";
-import { gateChannelsInMarkdown, generateNarrativeContext, polishNarrativeReport } from "@/lib/format";
+import { gateChannelsInMarkdown, generateNarrativeContext, polishNarrativeReport } from "@/lib/formatting";
 import { logEvent } from "@/lib/logger";
 import fs from "fs";
 

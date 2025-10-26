@@ -7,7 +7,7 @@ import { fetchClientByExactTitle, fetchClientByExactCommunity, findMonthlyRecapP
 import { normalizeChannels, filterExtractionByAllowedChannels } from "@/lib/channels";
 import { downloadPdfToTmp, isDirectPdfUrl } from "@/lib/pdf";
 import { extractFromPdfToJson, draftMarkdownReport } from "@/lib/claude";
-import { gateChannelsInMarkdown } from "@/lib/format";
+import { gateChannelsInMarkdown } from "@/lib/formatting";
 import { logEvent } from "@/lib/logger";
 import fs from "fs";
 

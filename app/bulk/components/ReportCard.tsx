@@ -35,7 +35,7 @@ export default function ReportCard({ state, onChangeMarkdown, notionPageId }: Pr
   const copyClientHtml = async () => {
     if (!state.markdown) return;
     try {
-      const { markdownToClientHtml } = await import("@/lib/format");
+      const { markdownToClientHtml } = await import("@/lib/formatting");
       const html = markdownToClientHtml(state.markdown);
       const blob = new Blob([html], { type: "text/html" });
       const data = [new ClipboardItem({ "text/html": blob, "text/plain": new Blob([state.markdown], { type: "text/plain" }) })];
@@ -110,7 +110,7 @@ function PreviewTabs({ markdown, onChange }: { markdown: string; onChange?: (v: 
     let mounted = true;
     (async () => {
       try {
-        const { markdownToClientHtml } = await import("@/lib/format");
+        const { markdownToClientHtml } = await import("@/lib/formatting");
         const h = markdownToClientHtml(markdown);
         if (mounted) setHtml(h);
       } catch {}
