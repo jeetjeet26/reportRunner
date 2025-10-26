@@ -10,6 +10,7 @@ type Recap = {
   pdfUrls: string[];
   lookerUrl: string | null;
   descriptor: string;
+  clientName?: string | null;
 };
 
 type JobState = {
@@ -281,6 +282,11 @@ export default function BulkRunner() {
                     <>
                       <div style={{ fontWeight: 600 }}>{title}</div>
                       <div style={{ color: "#666", fontSize: 12 }}>{r.communities.join(", ")}</div>
+                      {r.clientName ? (
+                        <div style={{ color: "#374151", fontSize: 12, marginTop: 2 }}>
+                          <span style={{ fontWeight: 600 }}>Client:</span> {r.clientName}
+                        </div>
+                      ) : null}
                     </>
                   );
                 })()}

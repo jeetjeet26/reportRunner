@@ -274,6 +274,38 @@ export async function fetchClientByExactCommunity(communityName: string): Promis
   };
 }
 
+// List all community names that belong to a given client name (case-insensitive compare).
+// Handles cases where the Client property is either a relation to a Clients DB or a text/title.
+export async function listCommunitiesForClient(clientName: string): Promise<string[]> {
+  const databaseId = env.NOTION_CLIENTS_DB_ID;
+  const out = new Set<string>();
+  const target = (clientName || "").trim().toLowerCase();
+  if (!target) return [];
+  try {
+    let cursor: string | undefined = undefined;
+    do {
+      const res = await notion.databases.query({ database_id: databaseId, start_cursor: cursor, page_size: 100 });
+      for (const page of res.results as any[]) {
+        const props = page.properties;
+        // Resolve client name similarly to fetchClientByExactTitle
+        let resolvedClient: string | null = null;
+        if (props?.Client?.type === "relation" && Array.isArray(props.Client.relation) && props.Client.relation.length > 0) {
+          resolvedClient = await getRelatedPageTitle(props.Client.relation[0].id as string);
+        } else {
+          resolvedClient = getPlainText(props?.Client) || getTitle(props?.Client);
+        }
+        if ((resolvedClient || "").trim().toLowerCase() !== target) continue;
+        const community = getTitle(props?.Community) || getPlainText(props?.Community);
+        if (community && community.trim()) out.add(community.trim());
+      }
+      cursor = res.next_cursor || undefined;
+    } while (cursor);
+  } catch (e) {
+    // Swallow and return what we have
+  }
+  return Array.from(out).sort((a, b) => a.localeCompare(b));
+}
+
 function getTitle(prop: any): string | null {
   if (!prop || prop.type !== "title" || !Array.isArray(prop.title)) return null;
   return prop.title.map((t: any) => t.plain_text).join("").trim() || null;
