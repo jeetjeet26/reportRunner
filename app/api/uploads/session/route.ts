@@ -1,4 +1,5 @@
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import os from "os";
@@ -71,9 +72,15 @@ export async function POST(req: NextRequest) {
   try {
     writeManifest(manifest);
   } catch (e: any) {
-    return new Response(JSON.stringify({ error: `Failed to create session: ${String(e?.message || e)}` }), { status: 500, headers: { "content-type": "application/json" } });
+    return new Response(
+      JSON.stringify({ error: `Failed to create session: ${String(e?.message || e)}` }),
+      { status: 500, headers: { "content-type": "application/json", "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0" } }
+    );
   }
-  return new Response(JSON.stringify({ sessionId, expiresAt }), { status: 200, headers: { "content-type": "application/json" } });
+  return new Response(
+    JSON.stringify({ sessionId, expiresAt }),
+    { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0" } }
+  );
 }
 
 

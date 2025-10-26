@@ -31,8 +31,14 @@ export default function BulkRunner() {
   const esRef = useRef<EventSource | null>(null);
   const [loadingMonths, setLoadingMonths] = useState<boolean>(false);
   const [loadingRecaps, setLoadingRecaps] = useState<boolean>(false);
-  const [uploadSessions, setUploadSessions] = useState<Record<string, { sessionId: string; status: { uploadedCount: number; requiredTotal: number; notionPdfCount: number; canSelect: boolean; remainingMissing: number; expiresAt: number } | null }>>({});
+  const [uploadSessions, setUploadSessions] = useState<Record<string, { sessionId: string; status: { uploadedCount: number; requiredTotal: number; notionPdfCount: number; canSelect: boolean; remainingMissing: number; expiresAt: number } | null; uploading?: boolean }>>({});
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+
+  // Strip any embedded PDF counters from the descriptor coming from the server
+  const getBaseDescriptor = (descriptor: string): string => {
+    // Remove any trailing "— <num> PDF" or "— <num> PDFs" segments (possibly repeated)
+    return descriptor.replace(/\s—\s*\d+\s*PDFs?/gi, "").trim();
+  };
 
   useEffect(() => {
     (async () => {
@@ -152,10 +158,16 @@ export default function BulkRunner() {
 
   const pollStatus = async (jobId: string, sessionId: string) => {
     try {
-      const res = await fetch(`/api/uploads/session/${sessionId}`);
+      const res = await fetch(`/api/uploads/session/${sessionId}`, { cache: "no-store" });
       const json = await res.json();
       if (res.ok) {
         setUploadSessions(prev => ({ ...prev, [jobId]: { sessionId, status: json } }));
+        const total = (json?.uploadedCount || 0) + (json?.notionPdfCount || 0);
+        const required = json?.requiredTotal || 0;
+        if (total >= required) {
+          // Auto-collapse the upload panel if requirement met
+          setExpandedRow(prev => (prev === jobId ? null : prev));
+        }
       }
     } catch {}
   };
@@ -170,11 +182,15 @@ export default function BulkRunner() {
     const sessionId = await ensureSession(job);
     const fd = new FormData();
     fd.append("file", file);
-    const res = await fetch(`/api/uploads/session/${sessionId}/file`, { method: "POST", body: fd });
+    // optimistically show uploading
+    setUploadSessions(prev => ({ ...prev, [job.jobId]: { ...(prev[job.jobId] || { sessionId }), sessionId, status: prev[job.jobId]?.status || null, uploading: true } }));
+    const res = await fetch(`/api/uploads/session/${sessionId}/file`, { method: "POST", body: fd, cache: "no-store" });
     const json = await res.json();
     if (res.ok) {
+      setUploadSessions(prev => ({ ...prev, [job.jobId]: { ...(prev[job.jobId] || { sessionId }), sessionId, status: prev[job.jobId]?.status || null, uploading: false } }));
       await pollStatus(job.jobId, sessionId);
     } else {
+      setUploadSessions(prev => ({ ...prev, [job.jobId]: { ...(prev[job.jobId] || { sessionId }), sessionId, status: prev[job.jobId]?.status || null, uploading: false } }));
       alert(json?.error || "Upload failed");
     }
   };
@@ -237,7 +253,18 @@ export default function BulkRunner() {
 
       <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
         {loadingRecaps && (
-          <div style={{ color: "#666" }}>Loading recaps…</div>
+          <div aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, border: "1px solid #e5e7eb", borderRadius: 8, background: "#f9fafb" }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" stroke="#d1d5db" strokeWidth="4" />
+              <path d="M22 12a10 10 0 0 0-10-10" stroke="#2563eb" strokeWidth="4" strokeLinecap="round">
+                <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite" />
+              </path>
+            </svg>
+            <div>
+              <div style={{ fontWeight: 600, color: "#111827" }}>Loading recaps…</div>
+              <div style={{ color: "#6b7280", fontSize: 12 }}>Hang tight, fetching data for {month || "the selected month"}.</div>
+            </div>
+          </div>
         )}
         {recaps.map(r => (
           <div key={r.jobId} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
@@ -248,7 +275,8 @@ export default function BulkRunner() {
                   const existing = Array.isArray(r.pdfUrls) ? r.pdfUrls.filter(Boolean).length : 0;
                   const uploaded = status?.uploadedCount ?? 0;
                   const total = existing + uploaded;
-                  const title = `${r.descriptor} — ${total} PDF${total === 1 ? "" : "s"}`;
+                  const base = getBaseDescriptor(r.descriptor);
+                  const title = `${base} — ${total} PDF${total === 1 ? "" : "s"}`;
                   return (
                     <>
                       <div style={{ fontWeight: 600 }}>{title}</div>
@@ -259,9 +287,12 @@ export default function BulkRunner() {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 {(() => {
+                  const status = uploadSessions[r.jobId]?.status;
                   const existing = Array.isArray(r.pdfUrls) ? r.pdfUrls.filter(Boolean).length : 0;
+                  const uploaded = status?.uploadedCount ?? 0;
                   const required = r.communities.length;
-                  const showUpload = existing !== required;
+                  const total = existing + uploaded;
+                  const showUpload = total < required;
                   return showUpload ? (
                     <button onClick={async () => { setExpandedRow(expandedRow === r.jobId ? null : r.jobId); if (!uploadSessions[r.jobId]?.sessionId) { try { await ensureSession(r); } catch {} } }}>
                       Upload PDF
@@ -298,9 +329,12 @@ export default function BulkRunner() {
               );
             })()}
             {(() => {
+              const status = uploadSessions[r.jobId]?.status;
               const existing = Array.isArray(r.pdfUrls) ? r.pdfUrls.filter(Boolean).length : 0;
+              const uploaded = status?.uploadedCount ?? 0;
               const required = r.communities.length;
-              const showUpload = existing !== required;
+              const total = existing + uploaded;
+              const showUpload = total < required;
               return showUpload && expandedRow === r.jobId;
             })() && (
               <div style={{ marginTop: 8, padding: 8, background: "#0f172a", color: "#e5e7eb", borderRadius: 6 }}>
@@ -313,6 +347,8 @@ export default function BulkRunner() {
                 </div>
                 <div>
                   <input type="file" accept="application/pdf" onChange={e => { const f = e.target.files?.[0]; if (f) void onUploadFile(r, f); e.currentTarget.value = ""; }} />
+                  {(() => { const us = uploadSessions[r.jobId]; return us?.uploading ? <span style={{ marginLeft: 8, fontSize: 12, color: "#93c5fd" }}>Uploading…</span> : null; })()}
+                  {(() => { const st = uploadSessions[r.jobId]?.status; if (!st) return null; const total = (st.uploadedCount ?? 0) + (st.notionPdfCount ?? 0); const pct = Math.min(100, Math.round((total / (st.requiredTotal || 1)) * 100)); return <div style={{ marginTop: 8, height: 6, background: "#1f2937", borderRadius: 4 }}><div style={{ width: `${pct}%`, height: 6, background: "#10b981", borderRadius: 4 }} /></div>; })()}
                 </div>
               </div>
             )}

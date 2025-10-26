@@ -1,4 +1,5 @@
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import os from "os";
@@ -45,7 +46,7 @@ export async function GET(_req: NextRequest, { params }: { params: { sessionId: 
     canSelect: !expired && (m.uploadedCount + m.notionPdfCount) >= m.requiredTotal,
     remainingMissing: Math.max(0, m.requiredTotal - (m.uploadedCount + m.notionPdfCount)),
     expiresAt: m.expiresAt,
-  }), { status: 200, headers: { "content-type": "application/json" } });
+  }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0" } });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { sessionId: string } }) {
@@ -60,7 +61,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { sessionI
       fs.rmSync(dir, { recursive: true, force: true });
     }
   } catch {}
-  return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0" } });
 }
 
 
