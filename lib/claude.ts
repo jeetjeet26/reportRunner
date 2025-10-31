@@ -18,10 +18,11 @@ async function extractPdfText(pdfPath: string): Promise<string> {
 
 async function callClaudeExtract(promptSystem: string, promptUser: string, pdfPath: string): Promise<ClaudeResponse> {
   const pdfText = await extractPdfText(pdfPath);
-  const model = "claude-3-5-sonnet-20240620";
+  const model = env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
   const body = {
     model,
     max_tokens: 4000,
+    temperature: 0,
     system: promptSystem,
     messages: [
       {
@@ -70,27 +71,53 @@ export async function extractFromPdfToJson({
   const sys = extractionSystem();
   const usr = extractionUser(contextSummary, schemaJson);
 
-  // One attempt + single retry on invalid JSON
-  const attempt = async (): Promise<any> => {
-    const res = await callClaudeExtract(sys, usr, pdfLocalPath);
-    const raw = res.content.trim();
-    let parsed: unknown;
+  const coerceJson = (raw: string): unknown => {
+    // 1) Try direct parse
     try {
-      parsed = JSON.parse(raw);
-    } catch (e) {
-      throw new Error("The extraction output was invalid JSON. Retrying once with stricter validation.");
+      return JSON.parse(raw);
+    } catch {}
+
+    // 2) Try fenced code block ```json ... ``` or ``` ... ```
+    const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenceMatch && fenceMatch[1]) {
+      const inner = fenceMatch[1].trim();
+      try {
+        return JSON.parse(inner);
+      } catch {}
     }
+
+    // 3) Extract the largest top-level JSON object by matching braces
+    const first = raw.indexOf("{");
+    const last = raw.lastIndexOf("}");
+    if (first !== -1 && last !== -1 && last > first) {
+      const candidate = raw.slice(first, last + 1);
+      try {
+        return JSON.parse(candidate);
+      } catch {}
+    }
+
+    throw new Error("The extraction output was invalid JSON");
+  };
+
+  // One attempt + single retry on invalid JSON
+  const attempt = async (strict: boolean): Promise<any> => {
+    const strictSuffix = strict
+      ? "\n\nReturn ONLY a single minified JSON object. Do not include code fences, comments, or any text outside the JSON."
+      : "";
+    const res = await callClaudeExtract(sys + strictSuffix, usr + strictSuffix, pdfLocalPath);
+    const raw = res.content.trim();
+    const parsed = coerceJson(raw);
     const normalized = normalizeExtractionJson(parsed);
     const validated = ExtractionSchema.parse(normalized);
     return validated;
   };
 
   try {
-    return await attempt();
+    return await attempt(false);
   } catch (err: any) {
-    if (String(err?.message || "").includes("invalid JSON")) {
-      // Retry once with the same prompts but caller can adjust system prompt later if needed
-      return await attempt();
+    if (String(err?.message || "").toLowerCase().includes("invalid json")) {
+      // Retry once with stricter guidance and coercion already applied
+      return await attempt(true);
     }
     throw err;
   }
@@ -152,7 +179,7 @@ export async function draftMarkdownReport({
 }) {
   const sys = draftingSystem();
   const usr = draftingUser(contextPacketJson, extractionJson);
-  const model = "claude-3-5-sonnet-20240620";
+  const model = env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
   const body = {
     model,
     max_tokens: 4000,
