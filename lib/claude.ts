@@ -6,14 +6,33 @@ import { extractionSystem, extractionUser, draftingSystem, draftingUser } from "
 type ClaudeResponse = { content: string };
 
 async function extractPdfText(pdfPath: string): Promise<string> {
+  console.log(`[extractPdfText] Reading PDF: ${pdfPath}`);
   const buf = await fs.promises.readFile(pdfPath);
+  console.log(`[extractPdfText] PDF size: ${buf.length} bytes`);
+  
   // Import internal entry to avoid index.js debug code that reads test PDFs
   const mod: any = await import("pdf-parse/lib/pdf-parse.js");
   const parser = (mod?.default ?? mod) as (b: Buffer) => Promise<{ text: string }>;
-  const res = await parser(buf);
+  
+  // Add timeout to pdf-parse (it can hang on corrupted PDFs)
+  const parseWithTimeout = Promise.race([
+    parser(buf),
+    new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error('PDF parsing timed out after 60 seconds')), 60000)
+    )
+  ]);
+  
+  console.log(`[extractPdfText] Parsing PDF...`);
+  const res = await parseWithTimeout;
+  console.log(`[extractPdfText] Extracted ${res.text.length} characters`);
+  
   // Truncate to keep prompt within model limits
   const maxChars = 100_000; // ~25k tokens rough
-  return res.text.length > maxChars ? res.text.slice(0, maxChars) : res.text;
+  const truncated = res.text.length > maxChars ? res.text.slice(0, maxChars) : res.text;
+  if (res.text.length > maxChars) {
+    console.log(`[extractPdfText] Truncated to ${maxChars} characters`);
+  }
+  return truncated;
 }
 
 async function callClaudeExtract(promptSystem: string, promptUser: string, pdfPath: string): Promise<ClaudeResponse> {
@@ -34,23 +53,42 @@ async function callClaudeExtract(promptSystem: string, promptUser: string, pdfPa
       },
     ],
   } as const;
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const msg = await resp.text().catch(() => resp.statusText);
-    throw new Error(`Anthropic extract failed: ${resp.status} ${msg}`);
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s timeout for Claude API
+  
+  try {
+    console.log(`[callClaudeExtract] Calling Claude API for extraction...`);
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    
+    if (!resp.ok) {
+      const msg = await resp.text().catch(() => resp.statusText);
+      console.error(`[callClaudeExtract] API error: ${resp.status} ${msg}`);
+      throw new Error(`Anthropic extract failed: ${resp.status} ${msg}`);
+    }
+    const json: any = await resp.json();
+    const parts: any[] = json?.content || [];
+    const text = parts.map((p: any) => (p.type === "text" ? p.text : "")).join("").trim();
+    console.log(`[callClaudeExtract] Successfully extracted ${text.length} chars`);
+    return { content: text };
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      console.error(`[callClaudeExtract] API call timed out after 120s`);
+      throw new Error(`Claude API call timed out after 120 seconds`);
+    }
+    throw err;
   }
-  const json: any = await resp.json();
-  const parts: any[] = json?.content || [];
-  const text = parts.map((p: any) => (p.type === "text" ? p.text : "")).join("").trim();
-  return { content: text };
 }
 
 export async function extractFromPdfToJson({
@@ -191,23 +229,42 @@ export async function draftMarkdownReport({
       },
     ],
   } as const;
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const msg = await resp.text().catch(() => resp.statusText);
-    throw new Error(`Anthropic draft failed: ${resp.status} ${msg}`);
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s timeout for Claude API
+  
+  try {
+    console.log(`[draftMarkdownReport] Calling Claude API for drafting...`);
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    
+    if (!resp.ok) {
+      const msg = await resp.text().catch(() => resp.statusText);
+      console.error(`[draftMarkdownReport] API error: ${resp.status} ${msg}`);
+      throw new Error(`Anthropic draft failed: ${resp.status} ${msg}`);
+    }
+    const json: any = await resp.json();
+    const parts: any[] = json?.content || [];
+    const text = parts.map((p: any) => (p.type === "text" ? p.text : "")).join("").trim();
+    console.log(`[draftMarkdownReport] Successfully drafted ${text.length} chars`);
+    return text;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      console.error(`[draftMarkdownReport] API call timed out after 120s`);
+      throw new Error(`Claude API call timed out after 120 seconds`);
+    }
+    throw err;
   }
-  const json: any = await resp.json();
-  const parts: any[] = json?.content || [];
-  const text = parts.map((p: any) => (p.type === "text" ? p.text : "")).join("").trim();
-  return text;
 }
 
 

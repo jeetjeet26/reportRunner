@@ -20,6 +20,8 @@ type JobState = {
   phase?: string;
   markdown?: string;
   error?: string;
+  postStatus?: "posting" | "posted" | "post_error";
+  postError?: string;
 };
 
 export default function BulkRunner() {
@@ -112,7 +114,15 @@ export default function BulkRunner() {
     });
     es.addEventListener("job_result", (e: MessageEvent) => {
       const data = JSON.parse((e as MessageEvent).data);
-      setJobs(prev => ({ ...prev, [data.jobId]: { ...(prev[data.jobId] || { jobId: data.jobId, label: prev[data.jobId]?.label || "" }), status: "done", markdown: data.markdown } }));
+      setJobs(prev => ({ ...prev, [data.jobId]: { ...(prev[data.jobId] || { jobId: data.jobId, label: prev[data.jobId]?.label || "" }), status: "done", markdown: data.markdown, postStatus: "posting" } }));
+    });
+    es.addEventListener("job_posted", (e: MessageEvent) => {
+      const data = JSON.parse((e as MessageEvent).data);
+      setJobs(prev => ({ ...prev, [data.jobId]: { ...(prev[data.jobId] || { jobId: data.jobId, label: prev[data.jobId]?.label || "" }), postStatus: "posted" } }));
+    });
+    es.addEventListener("job_post_error", (e: MessageEvent) => {
+      const data = JSON.parse((e as MessageEvent).data);
+      setJobs(prev => ({ ...prev, [data.jobId]: { ...(prev[data.jobId] || { jobId: data.jobId, label: prev[data.jobId]?.label || "" }), postStatus: "post_error", postError: data.message } }));
     });
     es.addEventListener("job_error", (e: MessageEvent) => {
       const data = JSON.parse((e as MessageEvent).data);
@@ -310,10 +320,10 @@ export default function BulkRunner() {
                   const required = r.communities.length;
                   const existing = Array.isArray(r.pdfUrls) ? r.pdfUrls.filter(Boolean).length : 0;
                   const uploaded = status?.uploadedCount ?? 0;
-                  const canSelect = status ? status.canSelect : (existing >= required);
-                  const disabled = !canSelect;
+                  const canSelect = true;
+                  const disabled = false;
                   return (
-                    <label title={disabled ? `Needs ${required} PDFs, have ${existing + uploaded}` : ""}>
+                    <label>
                       <input type="checkbox" checked={selected.has(r.jobId)} onChange={() => toggle(r.jobId)} disabled={disabled} /> Select
                     </label>
                   );

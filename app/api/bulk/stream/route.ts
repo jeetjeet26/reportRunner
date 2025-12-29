@@ -2,7 +2,7 @@ export const runtime = "nodejs";
 
 import { NextRequest } from "next/server";
 import { env } from "@/lib/env";
-import { listRecapsByMonth, fetchClientByExactCommunity, fetchClientByExactTitle, matchPdfToCommunity } from "@/lib/notion";
+import { listRecapsByMonth, fetchClientByExactCommunity, fetchClientByExactTitle, matchPdfToCommunity, postMarkdownAsBlocksToPage } from "@/lib/notion";
 import { normalizeChannels, filterExtractionByAllowedChannels } from "@/lib/channels";
 import { downloadPdfToTmp, isDirectPdfUrl } from "@/lib/pdf";
 import { extractFromPdfToJson, draftMarkdownReport } from "@/lib/claude";
@@ -233,6 +233,7 @@ export async function GET(req: NextRequest) {
           const urlToTmpPath = new Map<string, string>();
           const tmpPathsAll: string[] = [];
           try {
+            console.log(`[runJob ${jobId}] Starting to download ${uniqueUrls.length} PDFs`);
             for (let i = 0; i < uniqueUrls.length; i++) {
               const id = uniqueUrls[i];
               if (id.startsWith("local:")) {
@@ -240,26 +241,34 @@ export async function GET(req: NextRequest) {
                 const idx = Number(id.split(":")[1] || 0);
                 const f = uploadedFiles[idx];
                 if (f && f.localPath) {
+                  console.log(`[runJob ${jobId}] Using local file: ${f.localPath}`);
                   urlToTmpPath.set(id, f.localPath);
                 }
               } else {
                 const base = `${clientRecords[0]?.name || communities[0]}-${month}-${i + 1}`;
+                console.log(`[runJob ${jobId}] Downloading PDF ${i + 1}/${uniqueUrls.length}: ${id.substring(0, 100)}...`);
                 const p = await downloadPdfToTmp(id, base);
                 urlToTmpPath.set(id, p);
                 tmpPathsAll.push(p);
+                console.log(`[runJob ${jobId}] Successfully downloaded to ${p}`);
               }
             }
+            console.log(`[runJob ${jobId}] All PDFs downloaded successfully`)
 
             await send("job_phase", { jobId, phase: "Extracting" });
+            console.log(`[runJob ${jobId}] Starting extraction for ${communities.length} communities`);
 
             // Extract per community, merging within each community
             const perCommunity: Array<{ community: string; extraction: any }> = [];
             for (const community of communities) {
               const urls = communityToUrls.get(community) || uniqueUrls;
               const extractions: any[] = [];
+              console.log(`[runJob ${jobId}] Extracting for community: ${community} (${urls.length} PDFs)`);
               for (const u of urls) {
                 const p = urlToTmpPath.get(u)!;
+                console.log(`[runJob ${jobId}] Extracting from: ${p}`);
                 const extracted = await extractFromPdfToJson({ clientName: clientRecords[0]?.name || communities[0], monthLabel: month, pdfLocalPath: p });
+                console.log(`[runJob ${jobId}] Extraction complete`);
                 extractions.push(extracted);
               }
               // Merge extraction objects for this community
@@ -329,6 +338,7 @@ export async function GET(req: NextRequest) {
             }));
 
             await send("job_phase", { jobId, phase: "Drafting" });
+            console.log(`[runJob ${jobId}] Starting drafting phase`);
 
             const contextPacket = {
               clients: clientRecords.map(c => ({ name: c.name, client_property_status: c.clientPropStatus, tracking_review_status: c.trackStatus, looker_review_status: c.lookerStatus, client_account_manager: c.cam })),
@@ -343,17 +353,32 @@ export async function GET(req: NextRequest) {
             };
 
             let markdown = await draftMarkdownReport({ contextPacketJson: JSON.stringify(contextPacket), extractionJson: JSON.stringify(filtered ?? {}) });
+            console.log(`[runJob ${jobId}] Draft complete, polishing...`);
             markdown = gateChannelsInMarkdown(markdown, allowed_channels);
             markdown = polishNarrativeReport(markdown);
 
+            console.log(`[runJob ${jobId}] Sending result (${markdown.length} chars)`);
             await send("job_result", { jobId, markdown });
+
+            // Auto-post to Notion
+            await send("job_phase", { jobId, phase: "Posting to Notion" });
+            try {
+              await postMarkdownAsBlocksToPage({ pageId: jobId, markdown });
+              console.log(`[runJob ${jobId}] Successfully posted to Notion`);
+              await send("job_posted", { jobId });
+            } catch (postErr: any) {
+              console.error(`[runJob ${jobId}] Failed to post to Notion: ${postErr?.message || postErr}`);
+              await send("job_post_error", { jobId, message: String(postErr?.message || postErr) || "Failed to post to Notion" });
+            }
           } finally {
             // cleanup
+            console.log(`[runJob ${jobId}] Cleaning up ${tmpPathsAll.length} temporary files`);
             for (const p of tmpPathsAll) {
               try { if (p && fs.existsSync(p)) await fs.promises.unlink(p); } catch {}
             }
           }
         } catch (e: any) {
+          console.error(`[runJob ${jobId}] Error: ${e?.message || e}`, e);
           await send("job_error", { jobId, message: String(e?.message || e) || "Unknown error" });
         }
       }

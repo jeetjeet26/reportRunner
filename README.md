@@ -10,6 +10,7 @@ Built with Next.js 14 (App Router), Notion API, and Anthropic Claude.
 - **Extraction + Drafting**: Uses Claude to extract structured JSON and draft a markdown report.
 - **Channel gating**: Enforces a channel allow‑list in both the extraction payload and final markdown.
 - **Streaming progress**: Server‑Sent Events (SSE) for live phases; graceful POST fallback.
+- **Robustness**: Built-in timeouts and comprehensive logging for PDF downloads and AI extraction to prevent hanging on large files or slow connections.
 
 ## Requirements
 - Node.js 18+ (Next.js 14 App Router)

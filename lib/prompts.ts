@@ -61,10 +61,8 @@ export const draftingUser = (
   - For each community in ContextPacket.per_community, add a "### [Community Name]" subsection with 1–3 sentences summarizing cross-channel performance using only allowed_channels.
   - Do NOT write separate per-channel highlight sections in this mode.
 - Else (single property/community):
-  - **Website & Lead Activity** (if overall site metrics available)
-    - Write 1-3 sentences in paragraph form weaving together: sessions, users, leads, conversion rate, phone activity
-    - Lead with the positive story, then contextualize other metrics
   - **[Channel Name] Highlights** (one section per allowed_channel)
+    - IMPORTANT: Do NOT create a dedicated section for "Website", "Site", or "Website and Lead Activity". Integrate key website metrics (sessions, users) into the "Executive Summary" or relevant channel sections where they provide context for paid traffic.
     - Write 1-3 sentences as a flowing paragraph
     - Mention specific campaigns by name when performance stands out (good or needing attention)
     - Call out top keywords/ad groups with specific metrics when available
@@ -75,10 +73,11 @@ export const draftingUser = (
     - Lead each bullet with a bolded insight phrase like "**Bounce-Back in Paid Search**:" or "**High Conversion Efficiency**:"
 
 **Closing Section:**
-- **## Key Takeaways & Strategic Opportunities** AND IF ROOM a friendly question/recommendation
+- **## Key Takeaways & Strategic Opportunities**
   - If multi_community/community_highlights_mode: keep this concise (2–3 bullets max)
-  - If single property: end with 1-2 sentences and a friendly question for the client about next month's focus
-  - Example: "We will work with your team on getting the payment methods resolved so we have strong and consistent lead generation heading into August. For this month, does the focus remain on the Job Opportunities or do we need to be leaning into the CSGC division more this month? Let us know!"
+  - If single property: summarize the key wins and outline 1-2 strategic recommendations or next steps the digital team will focus on
+  - End on a positive, forward-looking note.
+  - STRICT PROHIBITION: Do NOT ask the client questions about their strategy or what they want to do (e.g., "What are your thoughts on...?", "Should we shift budget...?"). You are the expert; provide your recommendation instead.
 
 **Writing Style Guidelines:**
 - Use inline metrics naturally: "sessions increased by 5.6% to 3,624" not "sessions: 3,624 (+5.6%)"
