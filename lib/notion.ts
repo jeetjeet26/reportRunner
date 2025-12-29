@@ -185,6 +185,25 @@ function getMonthLabelFromProperty(prop: any): string | null {
       return d.toLocaleString("en-US", { month: "long", year: "numeric" });
     }
   }
+  // Formula
+  if (prop.type === "formula") {
+    if (prop.formula?.type === "string") return prop.formula.string || null;
+    if (prop.formula?.type === "date" && prop.formula.date?.start) {
+      const d = new Date(prop.formula.date.start as string);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleString("en-US", { month: "long", year: "numeric" });
+      }
+    }
+  }
+  // Rollup
+  if (prop.type === "rollup") {
+    // Try array of strings/dates/numbers
+    if (prop.rollup?.type === "array" && Array.isArray(prop.rollup.array) && prop.rollup.array.length > 0) {
+      // Just take the first one for now
+      const first = prop.rollup.array[0];
+      return getMonthLabelFromProperty(first);
+    }
+  }
   return null;
 }
 
@@ -409,94 +428,110 @@ export async function getMonthlyRecapLinks(params: {
   // Find inline database on the Monthly Recaps parent page
   const parentPageId = env.NOTION_MONTHLY_RECAPS_PARENT_PAGE_ID;
   const dbId = await findInlineDatabaseIdOnPage(parentPageId);
-  if (!dbId) return null;
-
-  // Pull a page of rows (typically under 100/board column); filter client-side
-  const res = await notion.databases.query({ database_id: dbId, page_size: 100 });
-  console.log(`[getMonthlyRecapLinks] Searching for community="${params.communityName}" month="${params.monthLabel}"`);
-  console.log(`[getMonthlyRecapLinks] Found ${res.results.length} rows in Monthly Recaps database`);
-  
-  for (const page of res.results as any[]) {
-    const props = page.properties;
-    // Determine community value(s) from relation or title/text
-    let communities: string[] = [];
-    if (props?.Community?.type === "relation" && Array.isArray(props.Community.relation) && props.Community.relation.length > 0) {
-      communities = await getRelatedPageTitlesFromRelationProperty(props.Community);
-    } else {
-      const communityRaw = getPlainText(props?.Community) || getTitle(props?.Community);
-      communities = parseMultipleCommunities(communityRaw);
-      if (communities.length === 0 && communityRaw) communities = [communityRaw];
-    }
-    
-    // Determine month value (property could be select/date/title/rich_text)
-    const month = getMonthLabelFromProperty(props?.["Recap Month"]) || getFirstTitleFromProperties({ RM: props?.["Recap Month"] });
-
-    console.log(`[getMonthlyRecapLinks] Row: communities=${JSON.stringify(communities)} month="${month}"`);
-
-    // Check if this row matches the requested month
-    if ((month || "").trim() !== params.monthLabel.trim()) {
-      continue; // Wrong month, skip this row
-    }
-
-    // Check if the requested community is in this row
-    const matchesCommunity = communities.some(
-      c => c.trim().toLowerCase() === params.communityName.trim().toLowerCase()
-    );
-    
-    if (!matchesCommunity) {
-      console.log(`[getMonthlyRecapLinks] No match - community not found in row`);
-      continue; // Community not found in this row
-    }
-
-    console.log(`[getMonthlyRecapLinks] ✓ Found matching row for community="${params.communityName}" month="${params.monthLabel}"`);
-
-    // Extract Looker URL (single URL for all communities)
-    const lookerUrl = getUrlOrText(props?.["Looker Studio Link (From Community)"]) || null;
-
-    // Handle PDF matching
-    let pdfUrl: string | null = null;
-
-    // First, try to get all files from the PDF property
-    const pdfProp = props?.["PDF To Attach"] || props?.PDF;
-    const allPdfFiles = getAllFilesFromProperty(pdfProp);
-    console.log(`[getMonthlyRecapLinks] Found ${allPdfFiles.length} PDF files:`, allPdfFiles.map(f => ({ name: f.name, url: f.url.substring(0, 50) + '...' })));
-
-    if (allPdfFiles.length > 0) {
-      // Multi-file property with one or more PDFs
-      if (communities.length === 1 && allPdfFiles.length === 1) {
-        // Simple case: single community, single PDF
-        pdfUrl = allPdfFiles[0].url;
-      } else if (communities.length > 1 && allPdfFiles.length > 1) {
-        // Multi-community row: try to match by filename
-        pdfUrl = matchPdfToCommunity(params.communityName, allPdfFiles);
-        
-        // Fallback: position-based matching if name matching fails
-        if (!pdfUrl && communities.length === allPdfFiles.length) {
-          const communityIndex = communities.findIndex(
-            c => c.trim().toLowerCase() === params.communityName.trim().toLowerCase()
-          );
-          if (communityIndex >= 0 && communityIndex < allPdfFiles.length) {
-            pdfUrl = allPdfFiles[communityIndex].url;
-          }
-        }
-      } else if (allPdfFiles.length === 1) {
-        // Multiple communities but only one PDF (use it for all)
-        pdfUrl = allPdfFiles[0].url;
-      } else {
-        // Try name matching regardless
-        pdfUrl = matchPdfToCommunity(params.communityName, allPdfFiles);
-      }
-    }
-
-    // Fallback: try the old getUrlOrText method (for URL or text fields)
-    if (!pdfUrl) {
-      pdfUrl = getUrlOrText(pdfProp);
-      if (pdfUrl) console.log(`[getMonthlyRecapLinks] Found PDF via getUrlOrText fallback`);
-    }
-
-    console.log(`[getMonthlyRecapLinks] Returning: pdfUrl=${pdfUrl ? pdfUrl.substring(0, 50) + '...' : null}, lookerUrl=${lookerUrl ? lookerUrl.substring(0, 50) + '...' : null}`);
-    return { pdfUrl, lookerUrl };
+  if (!dbId) {
+    console.log(`[getMonthlyRecapLinks] Could not find inline database on parent page ${parentPageId}`);
+    return null;
   }
+
+  // Pull all pages of rows (filter client-side)
+  let cursor: string | undefined = undefined;
+  let pageCount = 0;
+  
+  do {
+    const res = await notion.databases.query({ 
+      database_id: dbId, 
+      page_size: 100,
+      start_cursor: cursor,
+    });
+    
+    pageCount++;
+    console.log(`[getMonthlyRecapLinks] Searching for community="${params.communityName}" month="${params.monthLabel}" (Page ${pageCount}, found ${res.results.length} rows)`);
+    
+    for (const page of res.results as any[]) {
+      const props = page.properties;
+      // Determine community value(s) from relation or title/text
+      let communities: string[] = [];
+      if (props?.Community?.type === "relation" && Array.isArray(props.Community.relation) && props.Community.relation.length > 0) {
+        communities = await getRelatedPageTitlesFromRelationProperty(props.Community);
+      } else {
+        const communityRaw = getPlainText(props?.Community) || getTitle(props?.Community);
+        communities = parseMultipleCommunities(communityRaw);
+        if (communities.length === 0 && communityRaw) communities = [communityRaw];
+      }
+      
+      // Determine month value (property could be select/date/title/rich_text/formula/rollup)
+      const month = getMonthLabelFromProperty(props?.["Recap Month"]) || getFirstTitleFromProperties({ RM: props?.["Recap Month"] });
+
+      // console.log(`[getMonthlyRecapLinks] Row: communities=${JSON.stringify(communities)} month="${month}"`);
+
+      // Check if this row matches the requested month
+      if ((month || "").trim() !== params.monthLabel.trim()) {
+        continue; // Wrong month, skip this row
+      }
+
+      // Check if the requested community is in this row
+      const matchesCommunity = communities.some(
+        c => c.trim().toLowerCase() === params.communityName.trim().toLowerCase()
+      );
+      
+      if (!matchesCommunity) {
+        // console.log(`[getMonthlyRecapLinks] No match - community not found in row`);
+        continue; // Community not found in this row
+      }
+
+      console.log(`[getMonthlyRecapLinks] ✓ Found matching row for community="${params.communityName}" month="${params.monthLabel}"`);
+
+      // Extract Looker URL (single URL for all communities)
+      const lookerUrl = getUrlOrText(props?.["Looker Studio Link (From Community)"]) || null;
+
+      // Handle PDF matching
+      let pdfUrl: string | null = null;
+
+      // First, try to get all files from the PDF property
+      const pdfProp = props?.["PDF To Attach"] || props?.PDF;
+      const allPdfFiles = getAllFilesFromProperty(pdfProp);
+      console.log(`[getMonthlyRecapLinks] Found ${allPdfFiles.length} PDF files:`, allPdfFiles.map(f => ({ name: f.name, url: f.url.substring(0, 50) + '...' })));
+
+      if (allPdfFiles.length > 0) {
+        // Multi-file property with one or more PDFs
+        if (communities.length === 1 && allPdfFiles.length === 1) {
+          // Simple case: single community, single PDF
+          pdfUrl = allPdfFiles[0].url;
+        } else if (communities.length > 1 && allPdfFiles.length > 1) {
+          // Multi-community row: try to match by filename
+          pdfUrl = matchPdfToCommunity(params.communityName, allPdfFiles);
+          
+          // Fallback: position-based matching if name matching fails
+          if (!pdfUrl && communities.length === allPdfFiles.length) {
+            const communityIndex = communities.findIndex(
+              c => c.trim().toLowerCase() === params.communityName.trim().toLowerCase()
+            );
+            if (communityIndex >= 0 && communityIndex < allPdfFiles.length) {
+              pdfUrl = allPdfFiles[communityIndex].url;
+            }
+          }
+        } else if (allPdfFiles.length === 1) {
+          // Multiple communities but only one PDF (use it for all)
+          pdfUrl = allPdfFiles[0].url;
+        } else {
+          // Try name matching regardless
+          pdfUrl = matchPdfToCommunity(params.communityName, allPdfFiles);
+        }
+      }
+
+      // Fallback: try the old getUrlOrText method (for URL or text fields)
+      if (!pdfUrl) {
+        pdfUrl = getUrlOrText(pdfProp);
+        if (pdfUrl) console.log(`[getMonthlyRecapLinks] Found PDF via getUrlOrText fallback`);
+      }
+
+      console.log(`[getMonthlyRecapLinks] Returning: pdfUrl=${pdfUrl ? pdfUrl.substring(0, 50) + '...' : null}, lookerUrl=${lookerUrl ? lookerUrl.substring(0, 50) + '...' : null}`);
+      return { pdfUrl, lookerUrl };
+    }
+    
+    cursor = res.next_cursor || undefined;
+  } while (cursor);
+
   console.log(`[getMonthlyRecapLinks] No matching row found`);
   return null;
 }
@@ -507,15 +542,40 @@ export async function getMonthlyRecapLinks(params: {
 export async function listAvailableRecapMonths(): Promise<string[]> {
   const parentPageId = env.NOTION_MONTHLY_RECAPS_PARENT_PAGE_ID;
   const dbId = await findInlineDatabaseIdOnPage(parentPageId);
-  if (!dbId) return [];
-
-  const res = await notion.databases.query({ database_id: dbId, page_size: 100 });
-  const set = new Set<string>();
-  for (const page of res.results as any[]) {
-    const props = page.properties;
-    const label = getMonthLabelFromProperty(props?.["Recap Month"]) || getFirstTitleFromProperties({ RM: props?.["Recap Month"] });
-    if (label && label.trim()) set.add(label.trim());
+  if (!dbId) {
+    console.log(`[listAvailableRecapMonths] Could not find inline database on parent page ${parentPageId}`);
+    return [];
   }
+
+  console.log(`[listAvailableRecapMonths] Using database ID: ${dbId}`);
+
+  const set = new Set<string>();
+  let cursor: string | undefined = undefined;
+  let pageCount = 0;
+  let totalRows = 0;
+
+  do {
+    const res = await notion.databases.query({ 
+      database_id: dbId, 
+      page_size: 100,
+      start_cursor: cursor
+    });
+    
+    pageCount++;
+    totalRows += res.results.length;
+    console.log(`[listAvailableRecapMonths] Fetching page ${pageCount}, found ${res.results.length} rows`);
+
+    for (const page of res.results as any[]) {
+      const props = page.properties;
+      const label = getMonthLabelFromProperty(props?.["Recap Month"]) || getFirstTitleFromProperties({ RM: props?.["Recap Month"] });
+      // console.log(`[listAvailableRecapMonths] Row ID: ${page.id}, Label: "${label}"`);
+      if (label && label.trim()) set.add(label.trim());
+    }
+    cursor = res.next_cursor || undefined;
+  } while (cursor);
+
+  console.log(`[listAvailableRecapMonths] Total rows scanned: ${totalRows}, distinct months found: ${set.size}`);
+  console.log(`[listAvailableRecapMonths] Months:`, Array.from(set));
 
   // Sort descending by inferred date (year, month) when possible, else lexicographic desc
   const arr = Array.from(set);
@@ -550,41 +610,61 @@ export type RecapJobDescriptor = {
 export async function listRecapsByMonth(monthLabel: string): Promise<RecapJobDescriptor[]> {
   const parentPageId = env.NOTION_MONTHLY_RECAPS_PARENT_PAGE_ID;
   const dbId = await findInlineDatabaseIdOnPage(parentPageId);
-  if (!dbId) return [];
-
-  const res = await notion.databases.query({ database_id: dbId, page_size: 100 });
-  const out: RecapJobDescriptor[] = [];
-  for (const page of res.results as any[]) {
-    const props = page.properties;
-
-    // Month match
-    const month = getMonthLabelFromProperty(props?.["Recap Month"]) || getFirstTitleFromProperties({ RM: props?.["Recap Month"] });
-    if ((month || "").trim() !== monthLabel.trim()) continue;
-
-    // Communities
-    let communities: string[] = [];
-    if (props?.Community?.type === "relation" && Array.isArray(props.Community.relation) && props.Community.relation.length > 0) {
-      communities = await getRelatedPageTitlesFromRelationProperty(props.Community);
-    } else {
-      const communityRaw = getPlainText(props?.Community) || getTitle(props?.Community);
-      communities = parseMultipleCommunities(communityRaw);
-      if (communities.length === 0 && communityRaw) communities = [communityRaw];
-    }
-    communities = communities.map(c => c.trim()).filter(Boolean);
-    if (communities.length === 0) continue;
-
-    // PDFs
-    const pdfProp = props?.["PDF To Attach"] || props?.PDF;
-    const files = getAllFilesFromProperty(pdfProp);
-    const pdfUrls = files.map(f => f.url).filter(Boolean);
-
-    // Looker URL
-    const lookerUrl = getUrlOrText(props?.["Looker Studio Link (From Community)"]) || null;
-
-    const descriptor = `${communities.join(", ")} — ${pdfUrls.length} PDF${pdfUrls.length === 1 ? "" : "s"}${lookerUrl ? " + Looker" : ""}`;
-    out.push({ rowId: page.id as string, communities, pdfUrls, lookerUrl, descriptor });
+  if (!dbId) {
+    console.log(`[listRecapsByMonth] Could not find inline database on parent page ${parentPageId}`);
+    return [];
   }
 
+  const out: RecapJobDescriptor[] = [];
+  let cursor: string | undefined = undefined;
+  let pageCount = 0;
+
+  console.log(`[listRecapsByMonth] Fetching recaps for month: "${monthLabel}"`);
+
+  do {
+    const res = await notion.databases.query({ 
+      database_id: dbId, 
+      page_size: 100,
+      start_cursor: cursor 
+    });
+    
+    pageCount++;
+    console.log(`[listRecapsByMonth] Page ${pageCount}, found ${res.results.length} rows`);
+
+    for (const page of res.results as any[]) {
+      const props = page.properties;
+
+      // Month match
+      const month = getMonthLabelFromProperty(props?.["Recap Month"]) || getFirstTitleFromProperties({ RM: props?.["Recap Month"] });
+      if ((month || "").trim() !== monthLabel.trim()) continue;
+
+      // Communities
+      let communities: string[] = [];
+      if (props?.Community?.type === "relation" && Array.isArray(props.Community.relation) && props.Community.relation.length > 0) {
+        communities = await getRelatedPageTitlesFromRelationProperty(props.Community);
+      } else {
+        const communityRaw = getPlainText(props?.Community) || getTitle(props?.Community);
+        communities = parseMultipleCommunities(communityRaw);
+        if (communities.length === 0 && communityRaw) communities = [communityRaw];
+      }
+      communities = communities.map(c => c.trim()).filter(Boolean);
+      if (communities.length === 0) continue;
+
+      // PDFs
+      const pdfProp = props?.["PDF To Attach"] || props?.PDF;
+      const files = getAllFilesFromProperty(pdfProp);
+      const pdfUrls = files.map(f => f.url).filter(Boolean);
+
+      // Looker URL
+      const lookerUrl = getUrlOrText(props?.["Looker Studio Link (From Community)"]) || null;
+
+      const descriptor = `${communities.join(", ")} — ${pdfUrls.length} PDF${pdfUrls.length === 1 ? "" : "s"}${lookerUrl ? " + Looker" : ""}`;
+      out.push({ rowId: page.id as string, communities, pdfUrls, lookerUrl, descriptor });
+    }
+    cursor = res.next_cursor || undefined;
+  } while (cursor);
+
+  console.log(`[listRecapsByMonth] Found ${out.length} matching recaps total.`);
   return out;
 }
 
